@@ -1,0 +1,3 @@
+TEST IF RENDERED CORRECTLY - helm template [NAME] [CHART_DIR]
+
+INSTALL CHART - helm install [NAME] [CHART_DIR]
