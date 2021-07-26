@@ -1,0 +1,41 @@
+// project-based security can't be implemented by a pipeline, has to be manual through UI
+
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+
+pipeline {
+    agent {
+        node { 
+            label "CloudFS_Logger"
+        } 
+    }
+    options {
+        buildDiscarder(logRotator(numToKeepStr: "500", daysToKeepStr: "30"))
+        timestamps ()
+    }
+    parameters {
+        string(name: "APPLIANCE_VERSION", description: "APPLIANCE_VERSION will hold the version to be upgraded to , from the one held as default in snapshot")
+    }
+    stages {
+        stage("vSphere build step") {
+            steps {
+                setTitle("vSphere step")
+                
+                vSphere buildStep: [$class: 'RevertToSnapshot', snapshotName: 'StartUpgradeScenario', vm: 'CloudFS Upgrade Scenario - Genesis'], serverName: 'vSphere1'
+            }
+        }
+        stage("Trigger job") {
+            steps {
+                setTitle("TRIGGER JOB")
+                
+                build job: 'Run_Automation_Scenarios_pipeline', parameters: [
+                    string      (name: "APPLIANCE_VERSION"   , value: "${APPLIANCE_VERSION}"),
+                    string      (name: "ENABLE_RP"           , value: "true"),
+                ]
+            }
+        }
+    }
+}

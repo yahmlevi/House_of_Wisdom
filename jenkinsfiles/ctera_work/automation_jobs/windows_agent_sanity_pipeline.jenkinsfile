@@ -1,0 +1,80 @@
+// timestamp format can be changed throguh UI
+
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+
+pipeline {
+    agent {
+        node { 
+            label "master"
+            customWorkspace "/media/newdrive/AppAgentDaily"
+        } 
+    }
+    parameters {
+        string(name: "AGENT_VERSION", description: "AGENT_VERSION")
+    }
+    options {
+        buildDiscarder(logRotator(daysToKeepStr: '30', numToKeepStr: '500'))
+        timestamps ()
+    }
+    stages {
+        stage("Checkout") {
+            steps {
+                setTitle("CHECKOUT")
+
+                dir("WindowsSanity"){
+                    checkout([$class: "GitSCM",
+                    branches: [[name: "*/dev"]],
+                    extensions: [[$class: "CloneOption", depth: 0, noTags: false, shallow: true]], userRemoteConfigs: [[credentialsId: "0367fbd2-e744-4d9d-8bba-e5bf20bc115b",
+                        url: "http://git.ctera.local/Automation/Automation.git"]]] )
+                }
+            }
+        }
+        stage("Maven Clean - WindowsSanity/automation-core") {
+            steps {
+                setTitle("Maven Clean - WindowsSanity/automation-core")
+
+                sh "mvn clean install -Dmaven.repo.local=.repository -f WindowsSanity/automation-core/pom.xml -DskipTests=true"
+            }
+        }
+        stage("Maven Clean - WindowsSanity/vi-management") {
+            steps {
+                setTitle("Maven Clean - WindowsSanity/vi-management")
+
+                sh "mvn clean install -Dmaven.repo.local=.repository -f WindowsSanity/vi-management/pom.xml -DkipTests=true"
+            }
+        }
+        stage("Maven Clean - WindowsSanity/automation-api") {
+            steps {
+                setTitle("Maven Clean - WindowsSanity/automation-api")
+
+                sh "mvn clean install -Dmaven.repo.local=.repository -f WindowsSanity/automation-api/pom.xml -DskipTests=true"
+            }
+        }
+        stage("Maven Clean - WindowsSanity/automation-tests") {
+            steps {
+                setTitle("Maven Clean - WindowsSanity/automation-tests")
+
+                sh '''mvn clean test -Dmaven.repo.local=.repository -f WindowsSanity/automation-tests/pom.xml -Dtest=WindowsSanityScenarios -Dmaven.test.failure.ignore=true'''    
+            }
+        }
+    }
+    post {
+        always {
+            setTitle("POST STAGE")
+            
+            junit "WindowsSanity/automation-tests/target/surefire-reports/*.xml"
+            
+            emailext ( 
+                replyTo: "jenkins@ctera.com",
+                // to: "yahml@ctera.com",
+                  to: "yaniv@ctera.com, adi@ctera.com, zohar@ctera.com, janny@ctera.com, galb@ctera.com, davida@ctera.com, eyal@ctera.com, guy@ctera.com, boris@ctera.com, shlomi@ctera.com"
+                body: "${currentBuild.currentResult}: Job ${env.JOB_NAME} build ${env.BUILD_NUMBER}\n More info at: ${env.BUILD_URL}",
+                subject: "Windows Agent Sanity Result"
+            )
+        }
+    }
+}

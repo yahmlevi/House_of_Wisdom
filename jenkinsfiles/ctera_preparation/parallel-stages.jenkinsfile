@@ -1,0 +1,21 @@
+pipeline {
+  agent any
+  stages {
+    stage("Parallel") {
+      steps {
+        parallel (
+          "Taskone" : {
+            //do some stuff
+            echo 'first task'
+          },
+          "Tasktwo" : {
+            // Do some other stuff in parallel
+            echo 'second task'
+            sh "docker ps"
+            sleep 5
+          }
+        )
+      }
+    }
+  }
+}

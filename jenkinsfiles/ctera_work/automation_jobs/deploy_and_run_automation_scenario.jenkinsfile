@@ -1,0 +1,132 @@
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+// def vc_params_svt= [
+//         host_ip:        "192.168.81.15",
+//         datastore:      "SVT_Portal_1.5TB",
+//         network:        "17 - QA Automation",
+//         datacenter:     "CTERA",
+//         dest_folder:    "DevProd/QA/Portal-Daily"
+// ]
+def vc_params_test= [
+    host_ip:        "192.168.81.52",
+    datastore:      "ESXi-52-36TB",
+    network:        "17 - QA Automation",
+    datacenter:     "Technical Teams",
+    dest_folder:    "Engineering/Portal Sandbox/Portal-Daily"
+]
+
+pipeline {
+    agent {
+        node { 
+            label "PortalAutomationMinion"
+        } 
+    }
+    options {
+        timeout(time: 360, unit: "MINUTES")
+        buildDiscarder(logRotator(numToKeepStr: "30"))
+    }
+    parameters {
+        gitParameter name: "AutomationVersion",
+                    type: "PT_BRANCH_TAG",
+                    branchFilter: "origin/(.*)",
+                    defaultValue: "origin/dev",
+                    selectedValue: "DEFAULT",
+                    sortMode: "DESCENDING_SMART",
+                    useRepository: "http://git.ctera.local/Automation/Automation.git", 
+                    description: "GIT Branch or Version tag to build from"
+
+        // string(name: "AutomationVersion", defaultValue: "origin/dev", description: "GIT Branch or Version tag to build from")
+        string(name: "PortalImageVersion", description: "Version of the Portal image to be deployed")
+        string(name: "PortalVersion", description: "Portal version")
+        string(name: "MasterVmName", defaultValue: "daily70_master", description: "Name of the VM with Portal master server")
+        string(name: "SlaveVmName",  defaultValue: "daily70_slave", description: "Name of the VM with Portal slave server")
+        string(name: "TestSuites", defaultValue: "PortalInitialization", description: "Comma separated list of test suites")
+        string(name: "AgentIP", defaultValue: "192.168.17.164", description: "AgentIP")
+        string(name: "AgentMachineName", defaultValue: "AUTO-SMALL", description: "AgentMachineName")
+        string(name: "AgentVersion", defaultValue: "6.0.626.1", description: "AgentVersion")
+        string(name: "ApplianceIP", defaultValue: "192.168.14.46", description: "ApplianceIP")
+        string(name: "Appliance_Name", defaultValue: "vgw1-for-portal-daily", description: "Appliance_Name")
+        string(name: "ApplianceVersion", defaultValue: "7.0.905", description: "ApplianceVersion")
+        string(name: "APPLIANCE_TYPE", defaultValue: "Genesis", description: "APPLIANCE_TYPE")
+        string(name: "APPLIANCE_NETMASK", defaultValue: "255.255.255.0", description: "APPLIANCE_NETMASK")
+        string(name: "APPLIANCE_DEFAULT_GATEWAY", defaultValue: "192.168.17.1", description: "APPLIANCE_DEFAULT_GATEWAY")
+    }
+    stages{
+        stage("Create Portal Environment"){
+            steps{
+                script{
+                    setTitle("Create Portal Environment")
+                    
+                    echo "DEPLOYING PORTAL MACHINES"
+                    build job: "Deploy Portal from OVA", parameters: [
+                        string(name: "VM_NAMES",        value: "${MasterVmName},${SlaveVmName}"),
+                        string(name: "VM_ROLES",        value: "master,slave"),
+                        string(name: "IMAGE_VERSION",   value: "${PortalImageVersion}"),
+                        string(name: "VC_HOST_IP",      value: "${vc_params_test.host_ip}"),
+                        string(name: "VC_DATASTORE",    value: "${vc_params_test.datastore}"),
+                        string(name: "VC_VM_NETWORK",   value: "${vc_params_test.network}"),
+                        string(name: "VC_DATA_CENTER_NAME",      value: "${vc_params_test.datacenter}"),
+                        string(name: "VC_VM_DESTINATION_FOLDER", value: "${vc_params_test.dest_folder}")
+                    ]
+
+                    echo "Resolve VM IPs"
+                    def ips = [:]
+                    ["${MasterVmName}","${SlaveVmName}"].each{ vmname ->
+                        echo "Resolving ${vmname}"
+                        // addr= sh(returnStdout: true, script: '''
+                        //         echo $(sshpass -p password1! ssh -o "StrictHostKeyChecking=no" root@192.168.114.33 "java -jar /root/gitRep/Performance/scripts/esxi/VmTools.jar getIp portal_smoke_master | grep IP | awk $(print $NF)") 
+                        //         ''') // awk '"'"'{print ${NF}}'"'"' '
+                        addr = sh(returnStdout: true, script: '''
+                                echo $(sshpass -p password1! ssh -o "StrictHostKeyChecking=no" root@192.168.114.33 'java -jar /root/gitRep/Performance/scripts/esxi/VmTools.jar getIp portal_smoke_master | grep IP | awk '"'"'{print $NF}'"'"' ') 
+                                ''')
+                        echo "IP of ${vmname} is ${addr}"
+                        ips.put("${vmname}","${addr}")
+                    }
+
+                    echo "Upgrade portal VM's"
+                    ["${MasterVmName}", "${SlaveVmName}"].each {vm ->
+                        echo "Upgrading portal on ${vm} to version ${PortalVersion}"
+                        build job: "Deploy Portal", parameters: [
+                            string(name: "BASE_VERSION",  value: "6.5.x"), 
+                            string(name: "PortalMachine", value: "${vm}"), 
+                            string(name: "PORTAL_BUILD", value: "${PortalVersion}")
+                        ]
+                    }
+                }
+            }
+        }
+        stage("Run Automation Scenarios"){
+            steps{
+                script{
+                    setTitle("Run Automation Scenarios ${TestSuites}")
+
+                    def suites = "${TestSuites}".split(",")
+
+                    echo "Runing ${suites.size()} test suites: ${TestSuites}"
+                    suites.each{ suite ->
+                        echo "Running ${suite}"
+                        build job: "Run_Automation_Scenarios_pipeline", parameters:[
+                            string(name: "PortalIP",            value: ips.get("${MasterVmName}")),
+                            string(name: "TOMCAT_PortalIP",     value: ips.get("${SlaveVmName}")),
+                            string(name: "PortalVersion",       value: "${PortalVersion}"),
+                            string(name: "TestSuites",          value: "${suite}"),
+                            gitParameter(name: "AutomationVersion",   value: "${AutomationVersion}"),
+                            string(name: "AgentIP",             value: "${AgentIP}"),
+                            string(name: "AgentMachineName",    value: "${AgentMachineName}"),
+                            string(name: "AgentVersion",        value: "${AgentVersion}"),
+                            string(name: "ApplianceIP",         value: "${ApplianceIP}"),
+                            string(name: "Appliance_Name",      value: "${Appliance_Name}"),
+                            string(name: "ApplianceVersion",    value: "${ApplianceVersion}"),
+                            string(name: "APPLIANCE_TYPE",      value: "${APPLIANCE_TYPE}"),
+                            string(name: "APPLIANCE_NETMASK",   value: "${APPLIANCE_NETMASK}"),
+                            string(name: "APPLIANCE_DEFAULT_GATEWAY", value: "${APPLIANCE_DEFAULT_GATEWAY}")                           
+                        ]
+                    }
+                }
+            }
+        }
+    }
+}

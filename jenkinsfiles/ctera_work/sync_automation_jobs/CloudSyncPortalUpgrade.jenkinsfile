@@ -1,0 +1,111 @@
+// project-based security can't be implemented by a pipeline, has to be manual through UI
+
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+
+
+pipeline {
+  agent {
+     node { 
+        label "CloudFS_Logger"
+        } 
+  }
+  options {
+    buildDiscarder(logRotator(daysToKeepStr: "30", numToKeepStr: "500"))
+    timestamps ()
+    timeout(time: 30, unit: "MINUTES")
+  }
+  parameters {
+    gitParameter name: 'GitBranch', 
+            type: 'PT_BRANCH_TAG',
+            branchFilter: 'origin/(.*)',
+            defaultValue: 'dev',
+            selectedValue: 'DEFAULT',
+            sortMode: 'DESCENDING_SMART',
+            useRepository: 'http://git.ctera.local/Automation/Automation.git', 
+			description: 'GIT Branch or Version tag to build from'
+
+    string(name: "PortalVersion", description: "Portal SW version to upgrade to")
+    string(name: "PortalIP", description: "Portal machine IP")
+    string(name: "PortalVersionCterasharedURL", description: "URL of private build on cterashared (to be used instead of PORTAL_VERSION).    URL syntax Example: '\\Server\\username\\foldername\\CTERA-Portal-6.1.1279.1.tgz'")
+  }
+  stages {
+    stage("Checkout") {
+        steps {
+            setTitle("CHECKOUT")
+
+           checkout([  $class: "GitSCM", branches: [[name: "${params.GitBranch}"]],
+                   extensions: [[$class: "GitLFSPull"]], userRemoteConfigs: [[credentialsId: "0367fbd2-e744-4d9d-8bba-e5bf20bc115b",
+                   url: "http://git.ctera.local/Automation/Automation.git"]]])
+        }
+    }
+    stage("First bash script") {
+      steps {
+        setTitle("FIRST BASH SCRIPT")
+
+        sh '''
+            #!/bin/bash -xe
+
+            cp -f /media/newdrive/params.ini ./automation-tests/
+            cd automation-tests
+            sed -i "s|PORTAL_IP *=.*|PORTAL_IP = $PortalIP|g" params.ini
+            sed -i "s|PORTAL_VERSION *=.*|PORTAL_VERSION = $PortalVersion|g" params.ini
+            if [ "$PortalVersionCterasharedURL" != "" ]; then
+                    escaped=$(echo "$PortalVersionCterasharedURL" | sed 's;\\;\\\\;g')
+                    sed -i "s;PORTAL_VERSION_URL *=.*;PORTAL_VERSION_URL = $escaped;g" params.ini
+            fi
+            cat params.ini
+        '''
+      }
+    }
+    stage("Maven Clean - automation-core") {
+      steps {
+        setTitle("Maven Clean - automation-core")
+
+        sh "mvn clean install -Dmaven.repo.local=.repository -f automation-core/pom.xml -DskipTests=true"
+      }
+    }
+    stage("Maven Clean - vi-management") {
+      steps {
+        setTitle("Maven Clean - vi-management")
+
+        sh "mvn clean install -Dmaven.repo.local=.repository -f vi-management/pom.xml -DskipTests=true"
+      }
+    }
+    stage("Maven Clean - automation-api") {
+      steps {
+        setTitle("Maven Clean - automation-api")
+
+        sh "mvn clean install -Dmaven.repo.local=.repository -f automation-api/pom.xml -DskipTests=true"
+      }
+    }
+    stage("Maven Clean - automation-tests") {
+      steps {
+        setTitle("Maven Clean - automation-tests")
+
+        sh '''mvn clean $MAVEN_EXEC_MODE -Dmaven.repo.local=.repository -f automation-tests/pom.xml -Dtest=UpgradePortalVersionStep -Dmaven.test.failure.ignore=true'''
+      }
+    }
+  }
+  post {
+    always {
+        setTitle("POST ACTIONS")
+
+        junit "automation-tests\\target\\surefire-reports\\*.xml"
+
+
+        emailext (
+            replyTo: "jenkins@ctera.com",
+            to: "yahml@ctera.com",
+            // to: "janny@ctera.com, adi@ctera.com, idan@ctera.com, einat@ctera.com, yahml@ctera.com",
+            mimeType: 'text/html',
+            body: '''${JELLY_SCRIPT,template="html"}''',
+            subject: "Cloud Sync Portal Upgrade"
+        )
+        }
+    }
+  }
+}

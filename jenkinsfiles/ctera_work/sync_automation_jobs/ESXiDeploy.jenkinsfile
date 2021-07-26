@@ -1,0 +1,70 @@
+// project-based security can't be implemented by a pipeline, has to be manual through UI
+
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+
+
+pipeline {
+  agent {
+     node { 
+        label "CloudFS_Logger"
+        } 
+  }
+  options {
+    buildDiscarder(logRotator(daysToKeepStr: '30', numToKeepStr: '500'))
+  }
+  parameters {
+    choice(name: "IMG_TYPE", choices: ["PORTAL", "GATEWAY"], description: "IMG_TYPE")
+    string(name: "VM_NAMES", description: "Comma seperated values For example: portal_master,portal_slave")
+    string(name: "SERVERS_ROLES", defaultValue: "master", description: "Comma seperated values of server roles to match VM_NAMES, For example: master,slave Relevant only to PORTAL")
+    string(name: "IMG_IMAGE_VERSION", description: "IMG_IMAGE_VERSION")
+    string(name: "IMG_VC_HOST_IP", defaultValue: "192.168.81.52", description: "IMG_VC_HOST_IP")
+    string(name: "IMG_VC_DATASTORE", defaultValue: "ESXi-52-36TB", description: "IMG_VC_DATASTORE")
+    string(name: "IMG_VC_VM_NETWORK", defaultValue: "17 - QA Automation", description: "IMG_VC_VM_NETWORK")
+    string(name: "IMG_VC_DATA_CENTER_NAME", defaultValue: "Technical Teams", description: "IMG_VC_DATA_CENTER_NAME")
+    string(name: "IMG_VC_VM_DESTINATION_FOLDER", defaultValue: "Engineering", description: "For example: Engineering/Portal Sandbox")
+    }
+  stages {
+    stage("Checkout") {
+        steps {
+            setTitle("CHECKOUT")
+
+           checkout([  $class: "GitSCM", branches: [[name: "*/dev"]],
+                   userRemoteConfigs: [[credentialsId: "0367fbd2-e744-4d9d-8bba-e5bf20bc115b",
+                   url: "http://git.ctera.local/Automation/Automation.git"]]])
+        }
+    }
+    stage("Maven Clean - build_automation") {
+      steps {
+        setTitle("Maven Clean - build_automation")
+
+        sh "mvn clean install -Dmaven.repo.local=.repository -f build_automation.xml -DskipTests=true"
+      }
+    }
+    stage("Maven Clean - automation-tests") {
+      steps {
+        setTitle("Maven Clean - automation-tests")
+
+        sh '''mvn clean test -Dmaven.repo.local=.repository -f automation-tests/pom.xml -Dtest=ESXiDeployAndInit -Dmaven.test.failure.ignore=true -Dprint_request=false'''
+      }
+    }
+  }
+  post {
+    always {
+        setTitle("POST ACTIONS")
+
+        junit "automation-tests/target/surefire-reports/*.xml", allowEmptyResults: true
+        
+        emailext (
+            replyTo: '''${DEFAULT_REPLYTO}''',
+            to: "yahml@ctera.com",
+            //   to: "janny@ctera.com, yahml@ctera.com,
+            body: '''${DEFAULT_CONTENT}''',
+            subject: "ESXi Deployment -${PORTAL_VERSION} Automation Report"
+            )
+    }
+  }
+}

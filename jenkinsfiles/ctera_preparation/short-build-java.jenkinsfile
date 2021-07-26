@@ -1,0 +1,155 @@
+ // EXECUTABLE .JAR FILE https://stackoverflow.com/questions/574594/how-can-i-create-an-executable-jar-with-dependencies-using-maven   https://stackoverflow.com/questions/9689793/cant-execute-jar-file-no-main-manifest-attribute?page=1&tab=votes#tab-top
+def setTitle(title){
+    echo '=================================================='
+    echo '=================================================='
+    echo title
+    echo '=================================================='
+    echo '=================================================='
+}
+
+pipeline {
+    agent any
+    
+    environment {
+        // DOCKERHUB_SECRETS = credentials('dockerhub-secrets')
+        TEST = 'false'
+        DOCKER_REGISTRY = 'yahmlevi'
+        DOCKER_REPO = 'java_build'
+        LOCAL_IMAGE_NAME = 'my-java-app-image'
+
+    }
+    stages {
+        stage('checkout') {
+            agent { docker { image 'maven' } }
+            steps {
+                setTitle('CHECKOUT STAGE') 
+                sh 'rm -rf app'
+                sh 'rm -rf app@tmp'
+                sh 'ls -l'
+                sh 'mkdir app'
+                dir('app') {
+                    sh 'ls -l'
+                    git branch: 'main', url: 'https://github.com/yahmlevi/maven_project.git'
+                    sh 'ls -l'
+                }
+                stash name: 'app', includes: 'app/'
+            }
+        }
+        stage('test') {
+            when {
+                environment name: 'TEST', value: 'true'
+            }
+            agent { docker { image 'maven' } }
+            steps {
+                setTitle('TEST STAGE')
+                unstash 'app'
+                dir('app') {
+                    sh 'mvn test --quiet'
+                }
+                stash name: 'app', includes: 'app/'
+            }
+        }
+        stage('build') {
+            agent { docker { image 'maven' } }
+            steps {
+                setTitle('BUILD STAGE')
+                unstash 'app'
+                dir('app') {
+                    sh 'ls -l'
+                    sh 'mvn clean compile assembly:single -q'
+                    sh 'ls -l'
+                }
+                stash name: 'app', includes: 'app/'
+            }
+        }
+        stage('archive') {
+            steps {
+                setTitle('ARCHIVE STAGE')
+                unstash 'app'
+                sh 'ls -l'
+                dir('app') {
+                    archiveArtifacts artifacts: 'target/**/*.jar', fingerprint: true
+                    sh 'ls -l '
+                }
+                stash name: 'app', includes: 'app/'
+            }
+        }
+        stage('build app docker image') {
+            agent {
+                docker {
+                    image 'docker:dind'
+                    //LINUX/MAC OS
+                    //args '-v /var/run/docker.sock:/var/run/docker.sock'
+                    // WIN MACHINE
+                    args '-u root:root -e DOCKER_HOST=tcp://host.docker.internal:2375'
+                }
+            }
+            steps {
+                setTitle('BUILD DOCKER IMAGE STAGE')
+                unstash 'app'
+                dir('app') {   
+                    sh 'ls -l'
+                    sh 'ls -l target'
+                    sh '''
+                        export IMAGE_NAME="my-java-app-image"
+                        docker build --tag $IMAGE_NAME -f app.dockerfile .
+                        docker images | grep $IMAGE_NAME
+                        docker run --rm $IMAGE_NAME
+                    '''
+                }
+            }
+        }
+        stage('push to dockerhub') {
+            agent {
+                docker {
+                    image 'docker:dind'
+                    args '-u root:root -e DOCKER_HOST=tcp://host.docker.internal:2375'
+                }
+            }
+            environment {
+                DOCKERHUB_SECRETS = credentials('dockerhub-secrets')
+            }
+            steps {
+                setTitle('PUSH TO DOCKERHUB STAGE')
+                sh 'echo ${DOCKERHUB_SECRETS}'
+                sh 'echo ${DOCKERHUB_SECRETS_USR}'
+                sh 'echo ${DOCKERHUB_SECRETS_PSW}'
+                unstash 'app'
+                dir('app') {
+                    // script{
+                    //     BRANCH_NAME = "${GIT_BRANCH.replaceFirst(/^.*\//, '')}"
+                    // }
+                    // IMAGE_TAG=${BRANCH_NAME}-${BUILD_NUMBER}
+                    sh '''
+                        docker login -u ${DOCKERHUB_SECRETS_USR} -p ${DOCKERHUB_SECRETS_PSW}
+                           
+                        IMAGE_TAG=${BUILD_NUMBER}
+                        IMAGE_NAME=${DOCKER_REGISTRY}/${DOCKER_REPO}:$IMAGE_TAG
+                        
+                        docker tag $LOCAL_IMAGE_NAME $IMAGE_NAME
+                        docker push $IMAGE_NAME
+                 '''
+                }
+                stash name: 'app', includes: 'app/'
+            }
+        }
+        stage('clean') {
+            agent { docker { image 'maven' } }
+            steps {
+                setTitle('CLEAN STAGE')
+                unstash 'app'
+                dir('app') {
+                    sh 'mvn clean'
+                }
+                stash name: 'app', includes: 'app/'
+            }
+        }
+    }
+    post {
+        always {
+            setTitle('ALWAYS STAGE')
+            deleteDir()
+            cleanWs()
+        }
+    }  
+}

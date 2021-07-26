@@ -1,0 +1,31 @@
+version: "2"
+services:
+  master:
+    # image: eeacms/jenkins-master
+    image: yahm-master-docker
+    ports:
+    - "80:8080"
+    environment:
+    - JAVA_OPTS=-Xmx2048m
+    volumes:
+    - jenkins-master:/var/jenkins_home
+    - /var/run/docker.sock:/var/run/docker.sock 
+
+  worker:
+    image: yahm-slave-docker
+    environment:
+      JAVA_OPTS: "-Xmx2048m"
+      JENKINS_MASTER: "http://master:8080"
+      JENKINS_NAME: "worker"
+      JENKINS_USER: "yahm"
+      JENKINS_PASS: "1234"
+      JENKINS_RETRY: "10"
+    volumes:
+    - jenkins-worker:/var/jenkins_home/worker
+    - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  jenkins-master:
+  jenkins-worker:
+
+# docker-compose scale worker=3

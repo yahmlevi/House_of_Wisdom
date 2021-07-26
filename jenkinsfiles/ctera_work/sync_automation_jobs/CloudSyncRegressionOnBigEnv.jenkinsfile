@@ -1,0 +1,220 @@
+// project-based security can't be implemented by a pipeline, has to be manual through UI
+
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+
+pipeline {
+    agent {
+        node {
+            label "CloudFS_Logger"
+        }
+    }
+    options {
+        buildDiscarder(logRotator(numToKeepStr: "30"))
+        timestamps ()
+    }
+    parameters {
+        gitParameter name: "GitBranch", 
+            type: "PT_BRANCH_TAG",
+            tagFilter: "*",
+            branchFilter: ".*",
+            defaultValue: "origin/dev",
+            selectedValue: "DEFAULT",
+            sortMode: "NONE",
+            useRepository: "http://git.ctera.local/Automation/Automation.git", 
+			description: "GIT Branch or Version tag to build from"
+
+        string(name: "PORTAL_VERSION", defaultValue: "6.1.1358.2", description: "PORTAL_VERSION")
+        string(name: "VIRTUAL_PORTAL_NAME", defaultValue: "GenesisBigEnv", description: "VIRTUAL_PORTAL_NAME")
+        string(name: "APPLIANCE_VERSION", description: "APPLIANCE_VERSION")
+        string(name: "APPLIANCE_IP", defaultValue: "192.168.14.196", description: "Appliance to run on - for non-default execution. Parameter should be empty to run on the regular build server")
+        string(name: "APPLIANCE_NAME", defaultValue: "vGateway-02c3", description: "Appliance to run on - for non-default execution. Parameter should be empty to run on the regular build server")
+        string(name: "APPLIANCE_USER", defaultValue: "admin", description: "APPLIANCE_USER")
+        string(name: "APPLIANCE_PASS", defaultValue: "password1!", description: "APPLIANCE_PASS")
+        string(name: "APPLIANCE_TYPE", defaultValue: "Genesis", description: "valid options should be: X86, Genesis, arm or Kirkwood")
+        choice(name: "APPLIANCE_ALLOW_UPGRADE", choices: ["true", "false"], description: "Choose 'false' to avoid Appliance upgrade. Otherwise choose true.")
+        string(name: "APPLIANCE_FIRST_RAID", defaultValue: "linear", description: "Value should be as follows: 1 - for c200, 5 - for c400/c800, linear - for vGateway")
+        string(name: "WIN_IP", description: "IP address of windows machine for ACL tests")
+        string(name: "WIN_USER", defaultValue: "qa", description: "Windows machine username, for ACL tests")
+        string(name: "WIN_PASSWORD", defaultValue: "auto123!", description: "Windows machine password, for ACL tests")
+        choice(name: "MAVEN_EXEC_MODE", choices: ["test", "-Dmaven.surefire.debug test"], description: "MAVEN_EXEC_MODE")
+        choice(name: "FAST_DR", choices: ["false", "true"], description: "FAST_DR")
+        choice(name: "ENABLE_RP", choices: ["false", "true"], description: "ENABLE_RP")
+    }
+    stages {
+        stage("Checkout") {
+            steps {
+                setTitle("CHECKOUT")
+
+                checkout([  $class: "GitSCM", branches: [[name: "${GitBranch}"]],
+                    extensions: [[$class: "GitLFSPull"]], userRemoteConfigs: [[credentialsId: "0367fbd2-e744-4d9d-8bba-e5bf20bc115b",
+                    url: "http://git.ctera.local/Automation/Automation.git"]]])
+            }
+        }
+        stage ("First vSphere step"){
+            steps{
+                setTitle("First vSphere step")
+
+                vSphere buildStep: [$class: "RevertToSnapshot", snapshotName: "bigDB-ForAutomation", vm: "BigEnv - CloudSyncRegression - portal"], serverName: "vSphere1"
+				
+            }
+        }
+        stage ("Second vSphere step"){
+            steps{
+                setTitle("Second vSphere step")
+
+                vSphere buildStep: [$class: "PowerOn", timeoutInSeconds: 300, vm: "BigEnv - CloudSyncRegression - portal"], serverName: "vSphere1"
+            }
+        }
+        stage("Maven Clean - automation-core") {
+            steps {
+                setTitle("Maven Clean - automation-core")
+                sh "mvn clean install -Dmaven.repo.local=.repository -f automation-core/pom.xml -Dmaven.test.skip=true"
+            }
+        }
+        stage("Maven Clean - vi-management") {
+            steps {
+                setTitle("Maven Clean - vi-management")
+                sh "mvn clean install -Dmaven.repo.local=.repository -f vi-management/pom.xml -Dmaven.test.skip=true"
+            }
+        }
+        stage("Maven Clean - automation-api") {
+            steps {
+                setTitle("Maven Clean - automation-api")
+                sh "mvn clean install -Dmaven.repo.local=.repository -f automation-api/pom.xml -Dmaven.test.skip=true"
+            }
+        }
+        stage("First bash script") {
+            steps {
+                setTitle("First bash script")
+                sh '''
+                    cat /media/newdrive/SyncGatewayParams/App/params.ini_Portal | sed s/"PORTAL_ADMIN_USER.*"/"PORTAL_ADMIN_USER = admin"/ | sed s/"PORTAL_ADMIN_PASSWORD.*"/"PORTAL_ADMIN_PASSWORD = password1!"/ > ./automation-tests/syncParams.ini
+                    sed -i s/"PORTAL_IP.*"/"PORTAL_IP = 192.168.14.161"/ ./automation-tests/syncParams.ini;
+                    sed -i s/"PORTAL_VERSION.*"/"PORTAL_VERSION = 6.1.1358.2"/ ./automation-tests/syncParams.ini;
+                    grep "^PORTAL_VERSION" ./automation-tests/syncParams.ini > versions
+                    sed -i s/"SETUP_NEEDED.*"/"SETUP_NEEDED = false"/ ./automation-tests/syncParams.ini
+                    if [ "$VIRTUAL_PORTAL_NAME" != "" ]; then sed -i s/"VIRTUAL_PORTAL_NAME.*"/"VIRTUAL_PORTAL_NAME = $VIRTUAL_PORTAL_NAME"/ ./automation-tests/syncParams.ini; fi
+
+                    cat /media/newdrive/SyncGatewayParams/App/params.ini_AppCache | sed s/"APPLIANCE_ADMIN_USER.*"/"APPLIANCE_ADMIN_USER = $APPLIANCE_USER"/ | sed s/"APPLIANCE_ADMIN_PASSWORD.*"/"APPLIANCE_ADMIN_PASSWORD = $APPLIANCE_PASS"/ > app.tmp
+                    if [ "$APPLIANCE_IP" != "" ]; then sed -i s/"APPLIANCE_IP.*"/"APPLIANCE_IP = $APPLIANCE_IP"/ app.tmp; fi
+                    if [ "$APPLIANCE_NAME" != "" ]; then sed -i s/"APPLIANCE_NAME.*"/"APPLIANCE_NAME = $APPLIANCE_NAME"/ app.tmp; fi
+                    if [ "$APPLIANCE_TYPE" != "" ]; then sed -i s/"APPLIANCE_TYPE.*"/"APPLIANCE_TYPE = $APPLIANCE_TYPE"/ app.tmp; fi
+                    if [ "$APPLIANCE_FIRST_RAID" != "" ]; then sed -i s/"APPLIANCE_FIRST_RAID.*"/"APPLIANCE_FIRST_RAID = $APPLIANCE_FIRST_RAID"/ app.tmp; fi
+                    if [ "$APPLIANCE_ALLOW_UPGRADE" != "" ]; then sed -i s/"APPLIANCE_ALLOW_UPGRADE.*"/"APPLIANCE_ALLOW_UPGRADE = $APPLIANCE_ALLOW_UPGRADE"/ app.tmp; fi
+                    sed -i s/"FAST_DR.*"/"FAST_DR = $FAST_DR"/ ./automation-tests/syncParams.ini;
+                    cat app.tmp >> ./automation-tests/syncParams.ini
+
+                    if [ "$WIN_IP" != "" ]; then sed -i s/"AGENT_IP.*"/"AGENT_IP = $WIN_IP"/ ./automation-tests/syncParams.ini; fi
+                    if [ "$WIN_USER" != "" ]; then sed -i s/"AGENT_MACHINE_USER.*"/"AGENT_MACHINE_USER = $WIN_USER"/ ./automation-tests/syncParams.ini; fi
+                    if [ "$WIN_PASSWORD" != "" ]; then sed -i s/"AGENT_MACHINE_PASSWORD.*"/"AGENT_MACHINE_PASSWORD = $WIN_PASSWORD"/ ./automation-tests/syncParams.ini; fi
+
+                    if [ "$APPLIANCE_VERSION" != "" ]; then
+                        sed -i s/"APPLIANCE_VERSION.*"/"APPLIANCE_VERSION = $APPLIANCE_VERSION"/g ./automation-tests/syncParams.ini
+                    fi
+
+                    grep "^APPLIANCE_VERSION" ./automation-tests/syncParams.ini >> versions
+                '''
+            }
+        }
+        stage("Second bash script") {
+            steps {
+                setTitle("Second bash script")
+                sh '''
+                    cd automation-tests/src/main/resources/
+                    sed -i s/"rp.enable.*"/"rp.enable = $ENABLE_RP"/ ./reportportal.properties
+                    sed -i s/"rp.launch.*"/"rp.launch = GenesisBigEnv"/ ./reportportal.properties
+
+                    sed -i 's/rp\\.project.*/rp.project = cloudfs-genesis/' ./reportportal.properties
+                    sed -i s/"rp.skipped.issue.*"/"rp.skipped.issue = false"/ ./reportportal.properties
+
+                    echo "rp.description = $APPLIANCE_VERSION" >> ./reportportal.properties
+                    echo "rp.attributes = JBuild:$BUILD_NUMBER; Ver:$APPLIANCE_VERSION" >> ./reportportal.properties
+
+                    cat reportportal.properties
+                '''
+
+                script{
+                    def first_props = readProperties  file: "versions"
+                }
+            }
+        }
+        stage("Maven Clean - automation-tests") {
+            steps {
+                setTitle("Maven Clean - automation-tests")
+
+                sh '''mvn clean $MAVEN_EXEC_MODE -Dmaven.repo.local=.repository -f automation-tests/pom.xml -Dtest=CloudSyncRegressionScenario -Dmaven.test.failure.ignore=true'''
+            }
+        }
+        stage("First conditional step") {
+            steps {
+                script{
+                    setTitle("FIRST CONDITIONAL STEP")
+                    if (fileExists("automation-tests/portalVersionFile.txt") && "${PORTAL_VERSION}" == "") {
+                        def second_props = readProperties  file: "automation-tests/portalVersionFile.txt"
+                    } else {
+                        echo "FILE DOESN'T EXSISTS AND/OR PORTAL_VERSION VAR DOES NOT EQUAL AN EMPTY STRING" 
+                    }
+                }
+            }
+        }
+        stage("Second conditional step") {
+            steps {
+                script{
+                    setTitle("SECOND CONDITIONAL STEP")
+                    if ("${APPLIANCE_VERSION}" == "") {
+                        sh '''
+                            if [ -f automation-tests/syncParams.ini ]; then
+                                echo "APPLIANCE_VERSION=$(grep ^APPLIANCE_VERSION automation-tests/syncParams.ini | tr -d ' ' | cut -d = -f2)" > AppVer_File.txt
+                            fi
+                        '''
+                        script{
+                            def third_props = readProperties  file: "AppVer_File.txt"
+                        }
+                    } else {
+                        echo "FILE DOESN'T EXSISTS AND/OR PORTAL_VERSION VAR DOES NOT EQUAL AN EMPTY STRING" 
+                    }
+                }
+            }
+        }
+        stage("Third bash script") {
+            steps {
+                script{
+                    setTitle("THIRD BASH SCRIPT")
+                    
+                    sh '''
+                        #!/bin/bash
+
+                        if [ "$PORTAL_VERSION" = "" ] && [ -f automation-tests/portalVersionFile.txt ]; then
+                            PORTAL_VERSION=$(grep PORTAL_VERSION automation-tests/portalVersionFile.txt | cut -d = -f2 | tr -d [:space:])
+                        fi 
+                        if [ "$APPLIANCE_VERSION" = "" ] && [ -f AppVer_File.txt ]; then
+                            APPLIANCE_VERSION=$(grep APPLIANCE_VERSION AppVer_File.txt | cut -d = -f2 | tr -d [:space:])
+                        fi 
+                        echo "PARAMS: APPLIANCE_VERSION=$APPLIANCE_VERSION PORTAL_VERSION=$PORTAL_VERSION TestSuite=$TestSuite TestType=$TestType"
+                    '''
+                }
+            }
+        }
+    }
+    post {
+        always {
+            setTitle("POST ACTIONS")
+
+            archiveArtifacts artifacts: "automation-tests\\target\\surefire-reports\\*.xml", allowEmptyResults: true
+            
+            emailext (
+                replyTo: "jenkins@ctera.com",
+                to: "yahml@ctera.com"
+                // to: "adi@ctera.com, galb@ctera.com, einat@ctera.com, omer@ctera.com, pavelg@ctera.com, simont@ctera.com, idan@ctera.com, janny@ctera.com, yahml@ctera.com",
+                mimeType: "text/html",
+                attachLog: true,
+                compressLog: true,
+                body: '''${JELLY_SCRIPT,template="html"}''',
+                subject: "GenesisBigEnv, ${APPLIANCE_VERSION} Portal ${PORTAL_VERSION}"
+            )
+        }
+    }
+}

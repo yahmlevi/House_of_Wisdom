@@ -1,0 +1,109 @@
+// project-based security can't be implemented by a pipeline, has to be manual through UI
+
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+
+pipeline {
+    agent {
+        node {
+            label 'CloudFS_Logger'
+        }
+    }
+    options {
+        buildDiscarder(logRotator(numToKeepStr: "30"))
+    }
+    parameters {
+        string(name: "VG_VERSION", description: "VG_VERSION")
+        string(name: "GENESIS_VERSION", description: "GENESIS_VERSION")
+    }
+    stages {
+        stage ('First vSphere step'){
+            steps{
+                setTitle('First vSphere step')
+
+                vSphere buildStep: [$class: 'RevertToSnapshot', snapshotName: 'StartPinFolder', vm: 'CloudFS - manyCF auto - Portal'], serverName: 'vSphere1'
+				
+            }
+        }
+        stage ('Second vSphere step'){
+            steps{
+                setTitle('Second vSphere step')
+
+                vSphere buildStep: [$class: 'PowerOn', timeoutInSeconds: 300, vm: 'CloudFS - manyCF auto - Portal'], serverName: 'vSphere1'
+            }
+        }
+        stage ('Third vSphere step'){
+            steps{
+                setTitle('Third vSphere step')
+
+                vSphere buildStep: [$class: 'RevertToSnapshot', snapshotName: 'StartPinFolder', vm: 'CloudFS - ManyCF auto (cloud folder) - Genesis'], serverName: 'vSphere1'
+            }
+        }
+        stage ('Fourth vSphere step'){
+            steps{
+                setTitle('Fourth vSphere step')
+
+                vSphere buildStep: [$class: 'PowerOn', timeoutInSeconds: 300, vm: 'CloudFS - ManyCF auto (cloud folder) - Genesis'], serverName: 'vSphere1'
+            }
+        }
+        stage ('Fifth vSphere step'){
+            steps{
+                setTitle('Fifth vSphere step')
+
+                vSphere buildStep: [$class: 'RevertToSnapshot', snapshotName: 'StartPinFolder', vm: 'CloudFS - ManyCF auto (cloud folder) - VG'], serverName: 'vSphere1'
+            }
+        }
+        stage ('Sixth vSphere step'){
+            steps{
+                setTitle('Sixth vSphere step')
+
+                vSphere buildStep: [$class: 'PowerOn', timeoutInSeconds: 300, vm: 'CloudFS - ManyCF auto (cloud folder) - VG'], serverName: 'vSphere1'
+            }
+        }
+        stage ('Seventh vSphere step'){
+            steps{
+                setTitle('Seventh vSphere step')
+
+                vSphere buildStep: [$class: 'RevertToSnapshot', snapshotName: 'StartPinFolder', vm: 'CloudFS - ManyCF auto (sub folder) - Genesis'], serverName: 'vSphere1'
+            }
+        }
+        stage ('Eighth vSphere step'){
+            steps{
+                setTitle('Eighth vSphere step')
+
+                vSphere buildStep: [$class: 'PowerOn', timeoutInSeconds: 300, vm: 'CloudFS - ManyCF auto (sub folder) - Genesis'], serverName: 'vSphere1'
+            }
+        }
+        stage ('Ninth vSphere step'){
+            steps{
+                setTitle('Ninth vSphere step')
+
+                vSphere buildStep: [$class: 'RevertToSnapshot', snapshotName: 'StartPinFolder', vm: 'CloudFS - ManyCF auto (sub folder) - VG'], serverName: 'vSphere1'
+            }
+        }
+        stage ('Tenth vSphere step'){
+            steps{
+                setTitle('Tenth vSphere step')
+				
+                vSphere buildStep: [$class: 'PowerOn', timeoutInSeconds: 300, vm: 'CloudFS - ManyCF auto (sub folder) - VG'], serverName: 'vSphere1'
+            }
+        }
+        stage ('First build CloudSyncStandAloneScenarios job') {
+            steps {
+                setTitle('First build CloudSyncStandAloneScenarios job')
+
+                build job: 'CloudSyncStandAloneScenarios', parameters: [string(name: 'TestType', value: "PinnedCloudFolders"), string(name: 'VG_VERSION', value: "${VG_VERSION}"), string(name: 'GENESIS_VERSION', value: "${GENESIS_VERSION}"), string(name: 'NUM_PIN', value: '201')]
+            }
+        }
+        stage ('Second build CloudSyncStandAloneScenarios job') {
+            steps {
+                setTitle('Second build CloudSyncStandAloneScenarios job')
+
+                build job: 'CloudSyncStandAloneScenarios', parameters: [string(name: 'TestType', value: "PinnedSubFolders"), string(name: 'VG_VERSION', value: "${VG_VERSION}"), string(name: 'GENESIS_VERSION', value: "${GENESIS_VERSION}"), string(name: 'NUM_SUB_PIN', value: '201')], wait: true
+            }
+        }
+    }
+}

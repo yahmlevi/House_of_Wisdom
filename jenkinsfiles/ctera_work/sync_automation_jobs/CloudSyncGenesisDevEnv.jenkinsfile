@@ -1,0 +1,76 @@
+pipeline {
+    agent {
+        node {
+            label 'CloudFS_Minion'
+        }
+    }
+    options {
+        buildDiscarder(logRotator(numToKeepStr: "30"))
+        timeout(time: 20, unit: 'HOURS')
+        disableConcurrentBuilds()
+    }
+    parameters {
+        string(name: "PortalVersion", defaultValue: "6.1.1170.8", description: "PortalVersion")
+        string(name: "PortalVersionURL", description: "URL of private build on cterashared (to be used instead of PORTAL_VERSION) URL syntax Example: '\\Server\\username\\foldername\\CTERA-Portal-6.1.1279.1.tgz'   or   '\\cterashared.ctera.local\\Server\\username\\folderName\\CTERA-Portal-6.1.1279.1.tgz'")
+        string(name: "AppVersion", defaultValue: "7.0.1171", description: "AppVersion")
+        string(name: "AppVersionURL", description: "URL of private firmware on cterashared (to be used instead of APPLIANCE_VERSION). URL syntax Example:  Server\\username\\foldername\\   for folder   \\cterashared\\Server\\username\\foldername . There should be one .firm file in the folder URL syntax Example2: Server\\username\\foldername\\ctera-firmware-7.0.981.8.firm")
+        string(name: "APP_CACHE_IP", defaultValue: "192.168.14.31", description: "Appliance to run on")
+        string(name: "PORTAL_IP", defaultValue: "192.168.14.30", description: "Portal to run on")
+        choice(name: "APPLIANCE_ALLOW_UPGRADE", choices: ["true", "false"], description: "Choose 'false' to avoid Appliance upgrade. Otherwise choose true.")
+    }
+    stages {
+        stage ('Init param files') {
+            steps {
+                    sh '''
+                          #!/bin/sh
+                          cd /media/newdrive/SyncGatewayParams
+                          if [ "$PORTAL_VERSION" != "" ]; then sudo sed -i "s/PORTAL_VERSION.*/PORTAL_VERSION = $PortalVersion/" ./Dev/params.init_Portal; fi
+                          if [ "$APPLIANCE_VERSION" != "" ]; then sudo sed -i "s/APPLIANCE_VERSION.*/APPLIANCE_VERSION = $AppVersion/" ./Dev/params.ini_AppCache; fi
+                          if [ "$APP_CACHE_IP" != "" ]; then sudo sed -i "s/APP_CACHE_IP.*/APP_CACHE_IP = $APP_CACHE_IP/" ./Dev/params.ini_AppCache; fi
+                          sudo sed -i "s/APPLIANCE_ALLOW_UPGRADE.*/APPLIANCE_ALLOW_UPGRADE = $APPLIANCE_ALLOW_UPGRADE/" ./Dev/params.ini_AppCache;
+                          if [ "$PORTAL_IP" != "" ]; then sudo sed -i "s/PORTAL_IP.*/PORTAL_IP = $PORTAL_IP/" ./Dev/params.ini_Portal; fi
+                          if [ "$APPLIANCE_VERSION_URL" != "" ]; then sudo sed -i "s/APPLIANCE_VERSION_URL.*/APPLIANCE_VERSION_URL = $AppVersionURL/" ./Dev/params.ini_Portal; fi
+                          if [ "$PORTAL_VERSION_URL" != "" ]; then sudo sed -i "s/PORTAL_VERSION_URL.*/PORTAL_VERSION_URL = $PortalVersionURL/" ./Dev/params.ini_Portal; fi
+                      '''
+            }           
+        }
+        stage ('RevertMachine'){
+            steps{
+				script {
+				    if ( ( PORTAL_IP.isEmpty() ) || ( PORTAL_IP == "192.168.14.30" ) ) {
+				       if ( ( PortalVersion ==~ /.*7.0.*/ ) || ( PortalVersion ==~ /.*7.6.*/ ) ) {
+						vSphere buildStep: [$class: 'RevertToSnapshot', snapshotName: '7.0.50', vm: 'CloudSync Portal - DevEnv'], serverName: 'vSphere1'
+					    }
+					    else {
+					       vSphere buildStep: [$class: 'RevertToSnapshot', snapshotName: '6.1.1170.8', vm: 'CloudSync Portal - DevEnv'], serverName: 'vSphere1'
+					    }
+				    }
+				    else {
+				        echo 'No machine to revert, using custom Portal IP'
+				        stageResult:'SUCCESS'
+				        return
+				    }
+				}
+            }
+        }
+        stage ('Portal Upgrade'){
+            steps{
+                build job: 'CloudSyncPortalUpgrade', parameters: [string(name: 'PortalVersion', value: PortalVersion), string(name: 'PortalVersionCterasharedURL', value: PortalVersionURL), string(name: 'PortalIP', value: PORTAL_IP)]
+            }
+        }
+        stage('Portal Init') {
+            steps {
+                   build job: 'CloudSyncRegressionJob', parameters: [string(name: 'PORTAL_VERSION', value: PortalVersion), string(name: 'PORTAL_IP', value: PORTAL_IP), string(name: 'TestSuite', value: 'portal_init'), string(name: 'PORTAL_SETUP', value: 'true'), string(name: 'VIRTUAL_PORTAL_NAME', value: 'DevSyncPortal'), string(name: 'FlowToRun', value: 'Dev')], propagate: false
+            }
+        }
+        stage ('ApplianceCloudSyncRegression') {
+            steps {
+                parallel (
+                    "App_Caching" : {
+                        build job: 'ApplianceCloudSyncRegression', parameters: [string(name:'APPLIANCE_ALLOW_UPGRADE', value: APPLIANCE_ALLOW_UPGRADE), string(name: 'APPLIANCE_IP', value: APP_CACHE_IP), string(name: 'PORTAL_IP', value: PORTAL_IP), string(name: 'APPLIANCE_FIRM_URL', value: AppVersionURL), string(name: 'APPLIANCE_VERSION', value: AppVersion), string(name: 'TestType', value:'CloudSyncRegressionScenario'), string(name: 'TestSuite', value:'appliance_caching'), string(name: 'VIRTUAL_PORTAL_NAME', value: 'DevSyncPortal'), string(name: 'FlowToRun', value: 'Dev')], propagate: false
+                    }
+                )
+            }
+        }	
+    }
+}

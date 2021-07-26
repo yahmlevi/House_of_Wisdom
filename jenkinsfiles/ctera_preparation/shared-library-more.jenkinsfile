@@ -1,0 +1,27 @@
+lib = library ("jenkins-library@$gitBranchLibrary").com.tsadok.jenkins.flows
+
+def mainClass = lib.Main.new()
+def postClass = lib.Post.new()
+
+pipeline {
+    agent {
+        node {
+            label env.nodeLabel
+        }
+    }
+
+     stages {
+        stage("Main"){
+                steps {
+                    script { mainClass.run(this) }
+                }
+        }
+    }
+
+     post {
+        always {
+            script { postClass.run(this) }
+        }
+     }
+
+}

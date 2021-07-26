@@ -1,0 +1,125 @@
+def setTitle(title){
+    echo '=================================================='
+    echo '=================================================='
+    echo title
+    echo '=================================================='
+    echo '=================================================='
+}
+
+pipeline {
+    agent any
+    stages {
+        stage('checkout') {
+            agent { docker { image 'maven' } }
+            steps {
+                setTitle('CHECKOUT STAGE')
+                sh 'rm -rf app'
+                sh 'rm -rf app@tmp'
+                sh 'ls -l'
+                sh 'mkdir app'
+                dir('app') {
+                    sh 'ls -l'
+                    git branch: 'main', url: 'https://github.com/yahmlevi/maven_project.git'
+                    sh 'ls -l'
+                }
+                stash name: 'app', includes: 'app/'
+            }
+        }
+        stage('build') {
+            agent { docker { image 'maven' } }
+            steps {
+                setTitle('BUILD STAGE')
+                unstash 'app'
+                dir('app') {
+                    sh 'ls -l'
+                    sh 'mvn --version'
+                    sh 'mvn compile --quiet'
+                    sh 'ls -l'
+                    // sh 'ls -l target'
+                }
+                stash name: 'app', includes: 'app/'
+            }
+        }
+        stage('test') {
+            agent { docker { image 'maven' } }
+            steps {
+                setTitle('TEST STAGE')
+                unstash 'app'
+                dir('app') {
+                    sh 'mvn test --quiet'
+                    // sh 'ls -l target'
+                }
+                stash name: 'app', includes: 'app/'
+            }
+        }
+        stage('package') {
+            agent { docker { image 'maven' } }
+            steps {
+                setTitle('PACKAGE STAGE')
+                unstash 'app'
+                dir('app') {
+                    sh 'mvn package --quiet'
+                    // sh 'ls -l target'
+                }
+                stash name: 'app', includes: 'app/'
+            }
+        }
+        stage('archive') {
+            steps {
+                setTitle('ARCHIVE STAGE')
+                unstash 'app'
+                sh 'ls -l'
+                dir('app') {
+                    archiveArtifacts artifacts: 'target/**/*.jar', fingerprint: true   
+                    sh 'ls -l '
+                    // sh 'ls -l target'
+                }
+                stash name: 'app', includes: 'app/'
+            }
+        }
+        stage('build app docker image') {
+            agent {
+                docker {
+                    image 'docker:dind'
+                    //LINUX/MAC OS
+                    //args '-v /var/run/docker.sock:/var/run/docker.sock'
+                    // WIN MACHINE
+                    // --privileged -p 12375:2375 -e DOCKER_TLS_CERTDIR=""
+                    args '-u root:root -e DOCKER_HOST=tcp://host.docker.internal:2375'
+                }
+            }
+            steps {
+                setTitle('BUILD DOCKER IMAGE STAGE')
+                unstash 'app'
+                dir('app') {   
+                    sh 'ls -l'
+                    sh 'ls -l target'
+                    sh 'docker build --tag my-java-app-image -f app.dockerfile .'
+                    sh 'docker images | grep my-java-app-image'
+                    sh 'docker run --rm my-java-app-image'
+                }
+            }
+        }
+        stage('clean') {
+            agent { docker { image 'maven' } }
+            steps {
+                setTitle('CLEAN STAGE')
+                unstash 'app'
+                dir('app') {
+                    sh 'mvn clean'
+                    // sh 'ls -l target'
+                }
+                stash name: 'app', includes: 'app/'
+            }
+        }
+    }
+    post {
+        always {
+            setTitle('ALWAYS STAGE')
+            deleteDir()
+            cleanWs()
+        }
+    }  
+}
+
+// mvn clean compile assembly:single

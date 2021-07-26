@@ -1,0 +1,39 @@
+version: "2"
+services:
+  master:
+    image: jenkins-docker
+    # image: jenkins-docker-master
+    # image: eeacms/jenkins-master
+    ports:
+    - "8080:8080"
+    - "8443:8443"
+    - "50000:50000"
+    environment:
+    - DOCKER_HOST=tcp://host.docker.internal:2375
+    - JAVA_OPTS=-Xmx2048m
+    volumes:
+    # - jenkins-master:/var/jenkins_home
+    - jenkins-home:/var/jenkins_home
+
+  # worker:
+  #   # image: jenkins-docker
+  #   image: jenkins-docker-slave
+  #   # image: eeacms/jenkins-slave
+  #   environment:
+  #     - DOCKER_HOST=tcp://host.docker.internal:2375
+  #     - JAVA_OPTS=-Xmx2048m
+  #     - JENKINS_MASTER=http://master:8080
+  #     - JENKINS_NAME=worker
+  #     - JENKINS_USER=yahm
+  #     - JENKINS_PASS=1234
+  #     - JENKINS_RETRY=10
+  #   volumes:
+  #   - jenkins-worker:/var/jenkins_home/worker
+
+volumes:
+  #jenkins-master:
+  jenkins-home:
+#   jenkins-worker:
+
+# docker-compose scale worker=3
+# Install Dokcer plugins!! (docker pipeline)

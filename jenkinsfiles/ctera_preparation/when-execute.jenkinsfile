@@ -1,0 +1,24 @@
+// https://www.jenkins.io/doc/book/pipeline/syntax/#when
+// https://www.jenkins.io/doc/book/pipeline/syntax/#when-example
+
+pipeline {
+    agent any
+    stages {
+        stage('Example Build') {
+            steps {
+                 if(test-bool == true) {
+                    echo "Param test-bool is true"
+                 }
+                echo 'Hello World Build'
+            }
+        }
+        stage('Example Deploy') {
+            when {
+                environment name: 'test-bool', value: true
+            }
+            steps {
+                echo 'Hello World Deploy - ENV VAR test-bool is equal to TRUE!'
+            }
+        }
+    }
+}

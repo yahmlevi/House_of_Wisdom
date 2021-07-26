@@ -1,0 +1,102 @@
+// project-based security can't be implemented by a pipeline, has to be manual through UI
+
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+
+
+pipeline {
+  agent {
+     node { 
+        label "CloudFS_Logger"
+        } 
+  }
+  options {
+    // timeout(time: 240, unit: "MINUTES")
+    buildDiscarder(logRotator(daysToKeepStr: '30', numToKeepStr: '500'))
+    // timestamps ()
+  }
+  parameters {
+    
+    gitParameter name: 'GitBranch', 
+            type: 'PT_BRANCH_TAG',
+            branchFilter: '.*',
+            tagFilter: '*',
+            defaultValue: 'origin/dev',
+            selectedValue: 'DEFAULT',
+            sortMode: 'NONE',
+            useRepository: 'http://git.ctera.local/Automation/Automation.git', 
+			description: 'GIT Branch or Version tag to build from'
+
+    choice(name: "FlowToRun", choices: ["App", "Portal"], description: "flag which param_ini to take")
+    string(name: "PORTAL_IP", defaultValue: "", description: "Portal machine IP")
+    }
+  stages {
+    stage("Checkout") {
+        steps {
+            setTitle("CHECKOUT")
+
+           checkout([  $class: "GitSCM", branches: [[name: "${params.GitBranch}"]],
+                   extensions: [[$class: "GitLFSPull"]], userRemoteConfigs: [[credentialsId: "0367fbd2-e744-4d9d-8bba-e5bf20bc115b",
+                   url: "http://git.ctera.local/Automation/Automation.git"]]])
+        }
+    }
+    stage("First bash script") {
+      steps {
+        setTitle("FIRST BASH SCRIPT")
+
+        sh '''
+            cat /media/newdrive/SyncGatewayParams/$FlowToRun/params.ini_Portal > ./automation-tests/syncParams.ini
+            if [ "$PORTAL_IP" != "" ]; then sed -i s/"PORTAL_IP.*"/"PORTAL_IP = $PORTAL_IP"/ ./automation-tests/syncParams.ini; fi
+
+            cat ./automation-tests/syncParams.ini
+        '''
+      }
+    }
+    stage("Maven Clean - automation-core") {
+      steps {
+        setTitle("Maven Clean - automation-core")
+
+        sh "mvn clean install -Dmaven.repo.local=.repository -f automation-core/pom.xml -DskipTests=true"
+      }
+    }
+    stage("Maven Clean - vi-management") {
+      steps {
+        setTitle("Maven Clean - vi-management")
+
+        sh "mvn clean install -Dmaven.repo.local=.repository -f vi-management/pom.xml -DskipTests=true"
+      }
+    }
+    stage("Maven Clean - automation-api") {
+      steps {
+        setTitle("Maven Clean - automation-api")
+
+        sh "mvn clean install -Dmaven.repo.local=.repository -f automation-api/pom.xml -DskipTests=true"
+      }
+    }
+    stage("Maven Clean - automation-tests") {
+      steps {
+        setTitle("Maven Clean - automation-tests")
+
+        sh '''mvn clean $MAVEN_EXEC_MODE -Dmaven.repo.local=.repository -f automation-tests/pom.xml -Dtest=CloudSyncRegressionVerifyNewPath -Dmaven.test.failure.ignore=true'''
+      }
+    }
+  }
+  post {
+    always {
+        setTitle("POST ACTIONS")
+
+        junit "automation-tests\\target\\surefire-reports\\*.xml"
+        
+        emailext (
+            replyTo: "jenkins@ctera.com",
+            to: "yahml@ctera.com",
+            //   to: "adi@ctera.com, idan@ctera.com, einat@ctera.com, janny@ctera.com",
+            body: '''${JELLY_SCRIPT,template="html"}''',
+            subject: "Cloud Sync Verify Parent Guid Test after ${FlowToRun} Flow"
+            )
+    }
+  }
+}

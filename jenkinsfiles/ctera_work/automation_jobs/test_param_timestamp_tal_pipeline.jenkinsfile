@@ -1,0 +1,41 @@
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+
+
+pipeline {
+    agent {
+        node { 
+            label "PortalAutomationMinion"
+        } 
+    }
+
+    parameters {
+        string(name: "vm_names", defaultValue: "", description: "List of VM names") 
+    }
+    
+    stages {
+        stage("Shell script") {
+            steps {
+                setTitle("FIRST SHELL SCRIPT")
+                
+                sh '''
+                    #!/bin/bash
+                    set +x
+                    DATE_WITH_TIME=`date "+%Y%m%d-%H%M%S"`
+                    NAMES_ARRAY=$vm_names
+                    echo $NAMES_ARRAY
+                    NAMES=$(echo $NAMES_ARRAY | tr "," "\n")
+                    for NAME in $NAMES
+                    do
+                        NEW_NAMES=$NEW_NAMES,$NAME-$DATE_WITH_TIME
+                    done
+                    vm_names=${NEW_NAMES:1}
+                    echo $vm_names
+                '''
+            }
+        }
+    }
+}

@@ -1,0 +1,164 @@
+// block job when other jobs are running ("Portal_GUI_Tests","APP_GUI_Tests") must be done manually through UI. 
+
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+
+pipeline {
+    agent {
+        node { 
+            label "gui-agent-slave"
+        } 
+    }
+    options {
+        timeout(time: 360, unit: "MINUTES")
+        buildDiscarder(logRotator(numToKeepStr: "500", daysToKeepStr: "30"))
+    }
+    parameters {
+        choice(name: "APP_Branch", choices: ["dev", "6.0"], description: "APP Branch")
+        choice(name: "TestSuite", choices: ["fullTest", "sanityTest"], description: "TestSuite")
+        string(name: "Agent_Ver", description: "Agent version to install")
+    }
+    stages {
+        stage("Prepare an environment for the run") {
+            steps {
+                setTitle("PREPARE ENVIRONMENT")
+
+                script{
+                    def props = readProperties  file: "GUI_Branch.txt"
+
+                    if ("${APP_Branch}" == "dev") {
+                        APP_GUI_BRANCH = "master"
+                    } else {
+                        APP_GUI_BRANCH = "APP-${APP_Branch}"
+                    }
+                    sh "echo ${APP_GUI_BRANCH} > GUI_Branch.txt"
+                }
+            }
+        }
+        stage("Checkout") {
+            steps {
+                setTitle("CHECKOUT")
+
+                deleteDir()
+        
+                dir("Mock-Server") {
+                    checkout([$class: "GitSCM",
+                    branches: [[name: "*/master"]],
+                    doGenerateSubmoduleConfigurations: false,
+                    extensions: [[$class: "CloneOption", depth: 0, noTags: false, reference: "", shallow: true]], userRemoteConfigs: [[credentialsId: "0367fbd2-e744-4d9d-8bba-e5bf20bc115b",
+                        url: "http://git.ctera.local/GUI/Mock-Server.git"]]] )
+                }
+                dir("APP_GUI") {
+                    checkout([$class: "GitSCM",
+                    branches: [[name: "*/${APP_GUI_BRANCH}"]],
+                    doGenerateSubmoduleConfigurations: false,
+                    extensions: [[$class: "CloneOption", depth: 0, noTags: false, reference: "", shallow: true]], userRemoteConfigs: [[credentialsId: "0367fbd2-e744-4d9d-8bba-e5bf20bc115b",
+                        url: "http://git.ctera.local/GUI/GUI.git"]]] )
+                }
+            }
+        }
+        stage("First bash scripts") {
+            steps {
+                setTitle("FIRST BASH SCRIPT")
+
+                sh "ls -l"
+                sh '''
+                    if [ -f /usr/local/ctera-agent/scripts/uninstall-ctera-agent.sh ]; then
+                        sudo /usr/local/ctera-agent/scripts/uninstall-ctera-agent.sh
+                    fi
+                    BASE_VERSION=${Agent_Ver%.*}.x
+                    cp /mnt/versions/App/Versions/$BASE_VERSION/$Agent_Ver/linux/backup-agent-linux-${Agent_Ver}-CTERA.bin .
+                    chmod +x backup-agent-linux-${Agent_Ver}-CTERA.bin
+                    sudo ./backup-agent-linux-${Agent_Ver}-CTERA.bin yes
+                    rm -f backup-agent-linux-${Agent_Ver}-CTERA.bin
+                    sleep 10
+                    sudo cteractl signin -u devops -p 'password1!' team55fp.ctera.dev
+                '''
+            }
+        }
+        stage("Second bash scripts") {
+            steps {
+                setTitle("SECOND BASH SCRIPT")
+
+                sh '''
+                    for process in `sudo ps -ef | grep webdriver | grep -v grep | awk '{print $2}'`; do sudo kill -9 $process; done
+                    cd /home/jenkins/Agent_GUI_Tests
+                    rm -rf GUI
+                    mkdir GUI
+                    cd GUI
+                    cp /mnt/versions/App/Versions/Agent_${APP_Branch}_GUI.zip .
+                    unzip Agent_${APP_Branch}_GUI.zip
+                    rm -f Agent_${APP_Branch}_GUI.zip
+                    cd /home/jenkins/Agent_GUI_Tests/APP_GUI/WebTools/tests/test-agent-protractor
+                    sed -i 's#\\"ctera-mock-server\\"\\:.*#\\"ctera-mock-server\\"\\:\\ \\"\\/home\\/jenkins\\/Agent_GUI_Tests\\/Mock-Server\\"#' package.json
+                    sed -i 's#webAppPath.*#webAppPath\\ \\:\\ \\"\\/home\\/jenkins\\/Agent_GUI_Tests\\/GUI\"\\,#' env.conf.js
+                    sed -i 's#realServerAddress.*#realServerAddress\\:\\ \\"127.0.0.1\\"\\,#' env.conf.js
+                    sed -i 's#.*Mock-Server.*#\\ \\ \\ \\ \\ \\ \\"version\\"\\:\\ \\"file\\:\\/home\\/jenkins\\/Agent_GUI_Tests\\/Mock-Server\\"\\,#' package-lock.json
+                '''
+            }
+        }
+        stage("Third bash scripts") {
+            steps {
+                setTitle("THIRD BASH SCRIPT")
+                
+                sh '''
+                    cd /home/jenkins/Agent_GUI_Tests/Mock-Server
+                    npm install
+                    cd /home/jenkins/Agent_GUI_Tests/APP_GUI/WebTools/tests/test-agent-protractor
+                    npm install
+                    sudo webdriver-manager clean
+                    sudo webdriver-manager update
+                    webdriver-manager start &
+                    sleep 10
+                '''
+
+            }
+        }
+        stage("First conditional step") {
+            steps {
+                script{
+                    setTitle("FIRST CONDITIONAL STEP")
+
+                    if ("${currentBuild.currentResult}" == "SUCCESS") {
+                        echo "CURRENT BUILD IS A SUCCESS"
+                        sh '''
+                            cd /home/jenkins/Agent_GUI_Tests/APP_GUI/WebTools/tests/test-agent-protractor
+                            npm run $TestSuite
+                        '''
+                    } else {
+                        echo "BUILD IS NOT SUCCESS - DIDN'T EXECUTE SCRIPT"
+                        // error("Build failed because condition is not met")
+                    }
+                }
+            }
+        }
+
+        stage("Last bash script") {
+            steps {
+                script{
+                    setTitle("LAST BASH SCRIPT")
+
+                    sh '''for process in `sudo ps -ef | grep webdriver | grep -v grep | awk '{print $2}'`; do sudo kill -9 $process; done'''
+                }
+            }
+        }
+    }
+    post {
+    always {
+        setTitle("POST ACTIONS")
+
+        junit allowEmptyResults: true, testResults: "APP_GUI/WebTools/tests/test-agent-protractor/testresults/*.xml"
+        
+        emailext (
+                  replyTo: "jenkins@ctera.com",
+                  to: "yahml@ctera.com",
+                  // to: "olego@ctera.com",
+                  body: '''${JELLY_SCRIPT,template="html"}''',
+                  subject: "Agent ${APP_Branch} GUI Tests - ${TestSuite} - ${currentBuild.currentResult}"
+        )
+    }
+  }
+}

@@ -1,0 +1,92 @@
+// project-based security can't be implemented by a pipeline, has to be manual through UI
+
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+  
+pipeline {
+    agent {
+        node {
+            label 'CloudFS_Minion'
+        }
+    }
+    options {
+        timeout(time: 20, unit: 'HOURS')
+        disableConcurrentBuilds()
+    }
+    parameters {    
+        string(name: "APPLIANCE_VERSION", description: "APPLIANCE_VERSION")
+    }
+    stages {
+        stage('Init param files') {
+            steps {
+                setTitle("Init param files")
+                
+                sh '''
+                    #!/bin/sh
+                    cd /media/newdrive/SyncGatewayParams
+                    for file in `ls App/`; do
+                        sudo sed -i "s/APPLIANCE_VERSION.*/APPLIANCE_VERSION = $APPLIANCE_VERSION/g" ./App/$file
+                        sudo sed -i "s/^AGENT_VERSION.*/AGENT_VERSION = $APPLIANCE_VERSION/g" ./App/$file
+                    done
+                '''
+                script { 
+                    currentBuild.description = "$APPLIANCE_VERSION"
+                }
+            }
+        }
+        stage('Portal Init') {
+            steps {
+                setTitle("Portal Init")
+                
+                build job: 'CloudSyncRegressionJob', parameters: [string(name: 'APPLIANCE_VERSION', value: APPLIANCE_VERSION), string(name: 'TestSuite', value: 'portal_init'), string(name: 'PORTAL_SETUP', value: 'true'), string(name: 'VIRTUAL_PORTAL_NAME', value: 'SyncPortal'), string(name: 'PORTAL_VERSION', value: '7.0.186.20')]
+            }
+        }
+        stage ('CloudSyncRegressionJob') {
+            steps {
+                setTitle("CloudSyncRegressionJob")
+                
+                parallel (    
+                    "MAC" : {
+                        build job: 'CloudSyncRegressionJob', parameters: [string(name: 'APPLIANCE_VERSION', value: APPLIANCE_VERSION), string(name: 'TestSuite', value: 'mac_agent'), string(name: 'VIRTUAL_PORTAL_NAME', value: 'MacPortal'), string(name: 'FlowToRun', value: 'App'), string(name: 'ENABLE_RP', value: 'true')], propagate: false
+                    },
+                    "WIN" : {
+                        build job: 'CloudSyncRegressionJob', parameters: [string(name: 'APPLIANCE_VERSION', value: APPLIANCE_VERSION), string(name: 'TestSuite', value: 'windows_agent'),  string(name: 'VIRTUAL_PORTAL_NAME', value: 'WinPortal'), string(name: 'FlowToRun', value: 'App'), string(name: 'ENABLE_RP', value: 'true')], propagate: false
+                    },
+                    "WIN_Cache" : {
+                        build job: 'CloudSyncRegressionJob', parameters: [string(name: 'APPLIANCE_VERSION', value: APPLIANCE_VERSION), string(name: 'TestSuite', value: 'windows_agent_caching'), string(name: 'VIRTUAL_PORTAL_NAME', value: 'WinCachePortal'), string(name: 'FlowToRun', value: 'App'), string(name: 'ENABLE_RP', value: 'true')], propagate: false
+                    },
+                    "AzureWinCache" : {
+                        build job: 'CloudSyncRegressionJob', parameters: [string(name: 'APPLIANCE_VERSION', value: APPLIANCE_VERSION), string(name: 'TestSuite', value: 'azure_windows_caching'),  string(name: 'VIRTUAL_PORTAL_NAME', value: 'AzureWinPortal'), string(name: 'TestType', value: 'CloudSyncRegressionWithDirectScenario'), string(name: 'FlowToRun', value: 'App'), string(name: 'ENABLE_RP', value: 'true')], propagate: false
+                    },
+                    "S3WinCache" : {
+                        build job: 'CloudSyncRegressionJob', parameters: [string(name: 'APPLIANCE_VERSION', value: APPLIANCE_VERSION), string(name: 'TestSuite', value: 's3_windows_caching'),  string(name: 'VIRTUAL_PORTAL_NAME', value: 'S3WinPortal'), string(name: 'TestType', value: 'CloudSyncRegressionWithDirectScenario'), string(name: 'FlowToRun', value: 'App'), string(name: 'ENABLE_RP', value: 'true')], propagate: false
+                    }
+                )
+            }
+        }
+        stage ('FSCK Test') {
+            setTitle("FSCK Test")
+            
+            steps {
+                build job: 'CloudSyncRunFSCK', parameters: [string(name: 'FlowToRun', value: 'App'), string(name: 'PORTAL_IP', value: '192.168.82.201')], propagate: false
+            }
+        }
+        stage ('FSCK Test S3') {
+            steps {
+                setTitle("FSCK Test S3")
+
+                build job: 'CloudSyncRunFSCK', parameters: [string(name: 'FlowToRun', value: 'App'), string(name: 'PORTAL_IP', value: '192.168.17.130')], propagate: false
+            }
+        }
+        stage ('FSCK Test Azure') {
+            steps {
+                setTitle("FSCK Test Azure")
+
+                build job: 'CloudSyncRunFSCK', parameters: [string(name: 'FlowToRun', value: 'App'), string(name: 'PORTAL_IP', value: '192.168.17.134')], propagate: false
+            }
+        }
+    }
+}

@@ -1,0 +1,210 @@
+// project-based security can't be implemented by a pipeline, has to be manual through UI
+
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+
+
+pipeline {
+    agent {
+        node { 
+            label "CloudFS_Minion"
+        } 
+    }
+    options {
+        timeout(time: 30, unit: "MINUTES")
+        buildDiscarder(logRotator(numToKeepStr: "30"))
+        timestamps ()
+    }
+    parameters {
+        
+        gitParameter name: 'GitBranch', 
+            type: 'PT_BRANCH_TAG',
+            tagFilter: '*',
+            branchFilter: '.*',
+            defaultValue: 'origin/dev',
+            selectedValue: 'DEFAULT',
+            sortMode: 'NONE',
+            useRepository: 'http://git.ctera.local/Automation/Automation.git', 
+			description: 'GIT Branch or Version tag to build from'
+
+        string(name: "PORTAL_VERSION", description: "PORTAL_VERSION")
+        string(name: "PORTAL_IP", defaultValue: "192.168.17.154", description: "Portal to run on - for non-default execution. Parameter should be empty to run on the regular build server")
+        string(name: "PORTAL_USER", defaultValue: "admin", description: "Portal application administration user")
+        string(name: "PORTAL_PASS", defaultValue: "password1!", description: "Portal application administration password")
+        string(name: "PORTAL_SETUP", defaultValue: "false", description: "defines if to init the portal or not. if init is needed, need to set value to true")
+        string(name: "VIRTUAL_PORTAL_NAME", defaultValue: "SimPortal", description: "VIRTUAL_PORTAL_NAME")
+        string(name: "SIMULATOR_IP", defaultValue: "192.168.17.108", description: "Simulator to run on - for non-default execution. Parameter should be empty to run on the regular build server")
+        string(name: "SIMULATOR_VERSION", description: "SIMULATOR_VERSION")
+        string(name: "SIMULATOR_USER", defaultValue: "root", description: "SIMULATOR_USER")
+        string(name: "SIMULATOR_PASS", defaultValue: "ananas10", description: "SIMULATOR_PASS")
+        string(name: "NUMBER_OF_OPERATIONS", defaultValue: "20000", description: "NUMBER_OF_OPERATIONS")
+        string(name: "NUMBER_OF_SIMULATORS", defaultValue: "2", description: "NUMBER_OF_SIMULATORS")
+        string(name: "NUMBER_OF_CLIENTS", defaultValue: "1", description: "NUMBER_OF_CLIENTS")
+        choice(name: "MAVEN_EXEC_MODE", choices: ["test", "-Dmaven.surefire.debug test"], description: "MAVEN_EXEC_MODE")
+        string(name: "INIT_SIMULATOR", defaultValue: "false", description: "INIT_SIMULATOR")
+    }
+    stages {
+        stage("Checkout") {
+            steps {
+                setTitle("CHECKOUT")
+
+                checkout([$class: "GitSCM",
+                        branches: [[name: "${params.GitBranch}"]],
+                        doGenerateSubmoduleConfigurations: false,
+                        extensions: [[$class: "GitLFSPull"], [$class: "CloneOption", depth: 0, noTags: false, shallow: true]], userRemoteConfigs: [[credentialsId: "0367fbd2-e744-4d9d-8bba-e5bf20bc115b",
+                            url: "http://git.ctera.local/Automation/Automation.git"]]] )
+            }
+        }
+        stage("Maven Clean - automation-core") {
+            steps {
+                setTitle("Maven Clean - automation-core")
+
+                sh "mvn clean install -Dmaven.repo.local=.repository -f automation-core/pom.xml -DskipTests=true"
+            }
+        }
+        stage("Maven Clean - vi-management") {
+            steps {
+                setTitle("Maven Clean - vi-management")
+                
+                sh "mvn clean install -Dmaven.repo.local=.repository -f vi-management/pom.xml -DskipTests=true"
+            }
+        }
+        stage("Maven Clean - automation-api") {
+            steps {
+                setTitle("Maven Clean - automation-api")
+
+                sh "mvn clean install -Dmaven.repo.local=.repository -f automation-api/pom.xml -DskipTests=true"
+            }
+        }
+        stage("First bash script") {
+            steps {
+                setTitle("FIRST BASH SCRIPT")
+
+                sh '''
+                    cat /media/newdrive/SyncGatewayParams/App/params.ini_Portal | sed s/"PORTAL_ADMIN_USER.*"/"PORTAL_ADMIN_USER = $PORTAL_USER"/ | sed s/"PORTAL_ADMIN_PASSWORD.*"/"PORTAL_ADMIN_PASSWORD = $PORTAL_PASS"/ > ./automation-tests/syncParams.ini
+                    if [ "$PORTAL_IP" != "" ]; then sed -i s/"PORTAL_IP.*"/"PORTAL_IP = $PORTAL_IP"/ ./automation-tests/syncParams.ini; fi
+                    if [ "$PORTAL_VERSION" != "" ]; then sed -i s/"PORTAL_VERSION.*"/"PORTAL_VERSION = $PORTAL_VERSION"/ ./automation-tests/syncParams.ini; fi
+                    grep "^PORTAL_VERSION" ./automation-tests/syncParams.ini > versions
+                    sed -i s/"SETUP_NEEDED.*"/"SETUP_NEEDED = $PORTAL_SETUP"/ ./automation-tests/syncParams.ini
+                    if [ "$VIRTUAL_PORTAL_NAME" != "" ]; then sed -i s/"VIRTUAL_PORTAL_NAME.*"/"VIRTUAL_PORTAL_NAME = $VIRTUAL_PORTAL_NAME"/ ./automation-tests/syncParams.ini; fi
+                '''
+            }
+        }
+        stage("Second bash script") {
+            steps {
+                setTitle("SECOND BASH SCRIPT")
+
+                sh '''            
+                    cat /media/newdrive/SyncGatewayParams/App/params.ini_Simulator | sed s/"SIMULATOR_USER.*"/"SIMULATOR_USER = $SIMULATOR_USER"/ | sed s/"SIMULATOR_PASSWORD.*"/"SIMULATOR_PASSWORD = $SIMULATOR_PASS"/ > agent.tmp
+                    if [ "$SIMULATOR_IP" != "" ]; then sed -i s/"SIMULATOR_IP.*"/"SIMULATOR_IP = $SIMULATOR_IP"/ agent.tmp; fi
+                    cat agent.tmp >> ./automation-tests/syncParams.ini
+
+                    if [ "$SIMULATOR_VERSION" != "" ]; then
+                        sed -i s/"^SIMULATOR_VERSION.*"/"SIMULATOR_VERSION = $SIMULATOR_VERSION"/g ./automation-tests/syncParams.ini
+                    fi
+
+                    if [ "$NUMBER_OF_OPERATIONS" != "" ]; then
+                        sed -i s/"^NUMBER_OF_OPERATIONS.*"/"NUMBER_OF_OPERATIONS = $NUMBER_OF_OPERATIONS"/g ./automation-tests/syncParams.ini
+                    fi
+
+                    if [ "$NUMBER_OF_SIMULATORS" != "" ]; then
+                        sed -i s/"^NUMBER_OF_SIMULATORS.*"/"NUMBER_OF_SIMULATORS = $NUMBER_OF_SIMULATORS"/g ./automation-tests/syncParams.ini
+                    fi
+
+                    if [ "$INIT_SIMULATOR" != "" ]; then
+                        sed -i s/"^INIT_SIMULATOR.*"/"INIT_SIMULATOR = $INIT_SIMULATOR"/g ./automation-tests/syncParams.ini
+                    fi
+
+                    grep "^SIMULATOR_VERSION" ./automation-tests/syncParams.ini >> versions
+                '''
+
+                script {
+                        def first_props = readProperties  file: "versions"
+                    }
+            }
+        }
+        stage("Maven Clean - automation-tests") {
+            steps {
+                setTitle("Maven Clean - automation-tests")
+                
+                sh '''mvn clean $MAVEN_EXEC_MODE -Dmaven.repo.local=.repository -f automation-tests/pom.xml -Dtest=SyncSimulatorTests#testOneClientCreateFilesOtherClientsDownloadChanges -Dmaven.test.failure.ignore=true'''
+            }
+        }
+        stage("First conditional step") {
+            steps {
+                script{
+                    setTitle("FIRST CONDITIONAL STEP")
+
+                    if (fileExists("automation-tests/portalVersionFile.txt") &&  "${PORTAL_VERSION}" == "") {
+                        echo "FILE EXSISTS"
+                        script{
+                            def second_props = readProperties  file: "automation-tests/portalVersionFile.txt"
+                        }
+                    } else {
+                        echo "FILE (automation-tests/portalVersionFile.txt) DOESN'T EXSISTS, AND/OR PORTAL_VERSION PARAMETER NOT EQUALS EMPTY STRING" 
+                    }
+                }
+            }
+        }
+        stage("Second conditional step") {
+            steps {
+                script{
+                    setTitle("SECOND CONDITIONAL STEP")
+
+                    if ("${SIMULATOR_VERSION}" == "") {
+                        echo "CONDITION IS MET"
+                        sh '''
+                            if [ -f automation-tests/syncParams.ini ]; then
+                                grep ^SIMULATOR_VERSION automation-tests/syncParams.ini > /dev/null
+                                if [ $? -eq 0 ]; then
+                                    echo "SIMULATOR_VERSION=$(grep ^SIMULATOR_VERSION automation-tests/syncParams.ini | tr -d ' ' | cut -d = -f2)" > AppVer_File.txt
+                                fi
+                            fi
+                        '''
+                        
+                        def third_props = readProperties  file: "AppVer_File.txt"
+                        
+                    } else {
+                        echo "SIMULATOR_VERSION VAR NOT EQUALS EMPTY STRING AND/OR TestSuite VAR EQUALS 'portal_init'" 
+                    }
+                }
+            }
+        }
+        stage("Third bash script") {
+            steps {
+                setTitle("THIRD BASH SCRIPT")
+
+                sh '''
+                    if [ "$PORTAL_VERSION" = "" ] && [ -f automation-tests/portalVersionFile.txt ]; then
+                        PORTAL_VERSION=$(grep PORTAL_VERSION automation-tests/portalVersionFile.txt | cut -d = -f2 | tr -d [:space:])
+                    fi 
+                    if [ "$SIMULATOR_VERSION" = "" ] && [ -f AppVer_File.txt ]; then
+                        SIMULATOR_VERSION=$(grep SIMULATOR_VERSION AppVer_File.txt | cut -d = -f2 | tr -d [:space:])
+                    fi 
+                    echo "PARAMS: SIMULATOR_VERSION=$SIMULATOR_VERSION PORTAL_VERSION=$PORTAL_VERSION"
+                '''  
+            }
+        }
+    }
+    post {
+        always {
+            setTitle("POST ACTIONS")
+
+            junit "automation-tests\\target\\surefire-reports\\*.xml"
+            
+            emailext (
+                replyTo: "jenkins@ctera.com",
+                to: "yahml@ctera.com",
+                //   to: "pavelg@ctera.com, yahml@ctera.com",
+                mimeType: 'text/html',
+                attachLog: true,
+                compressLog: true,
+                body: '''${JELLY_SCRIPT,template="html"}''',
+                subject: "Cloud Sync regression Simulator ${SIMULATOR_VERSION} Portal ${PORTAL_VERSION}"
+            )
+        }
+    }
+}

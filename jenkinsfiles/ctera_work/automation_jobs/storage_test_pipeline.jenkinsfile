@@ -1,0 +1,72 @@
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+
+
+pipeline {
+  agent {
+      node { 
+        label "master"
+      } 
+  }
+  options {
+    timeout(time: 1, unit: "MINUTES")
+    buildDiscarder(logRotator(numToKeepStr: "500", daysToKeepStr: "30"))
+  }
+  parameters {
+    string(name: "APPLIANCE_IP", defaultValue: "192.168.99.169", description: "APPLIANCE_IP")
+    string(name: "APPLIANCE_VERSION", description: "APPLIANCE_VERSION")
+    string(name: "APPLIANCE_USER", defaultValue: "admin", description: "APPLIANCE_USER")
+    string(name: "APPLIANCE_PASSWORD", defaultValue: "password1!", description: "APPLIANCE_PASSWORD")
+    choice(name: "APPLIANCE_TYPE", choices: ["X86", "Kirkwood", "DailyTests_5_5FP", "arm"], description: "APPLIANCE_TYPE")
+  }
+  stages {
+    stage("Shell script") {
+        steps {
+            setTitle("SHELL SCRIPT")
+       
+            sh '''
+            #!/bin/bash +x
+
+            export PATH=/media/newdrive/AppAgentDaily/dev/App/Bin/UNIX:$PATH
+            source /media/newdrive/AppAgentDaily/dev/App/Bin/UNIX/ctera-appliance-host-tools
+
+            export CTERA_LOGIN="$APPLIANCE_USER:$APPLIANCE_PASSWORD@$APPLIANCE_IP"
+
+            echo "checking current appliance version:"
+            ctera_client.py "api_get('status/device/runningFirmware')"
+            BASE_VERSION=${APPLIANCE_VERSION%.*}.x
+            if [ ! -f /media/newdrive/ApplianceAutomation/Versions/$BASE_VERSION/$APPLIANCE_VERSION/$APPLIANCE_TYPE/*.firm ]; then
+                echo "Firmware to upload not found - aborting"
+                exit 1
+            fi
+            FIRMWARE=`ls /media/newdrive/ApplianceAutomation/Versions/$BASE_VERSION/$APPLIANCE_VERSION/$APPLIANCE_TYPE/*.firm`
+            ctera_client.py "ctera_firmware_wait('$FIRMWARE')"
+
+            if [ ! -f /media/newdrive/ApplianceAutomation/Versions/tests.tgz ]; then
+                echo "Failed to find tests tarball - aborting"
+                exit 1
+            fi
+
+            status=0
+            test_all || let status+=1
+
+            echo "Failed: $status"
+            exit $status 
+            '''
+        }
+    }
+    }
+  }
+  post {
+    always {
+        setTitle("POST ACTIONS")
+
+        archiveArtifacts artifacts: "automation-tests/target/surefire-reports/*.xml, automation-core.log, Jenkins/ctera_dump.tar.gz.*", fingerprint: true, defaultExcludes: true, followSymlinks: true, caseSensitive: true
+        
+        junit "automation-tests/target/surefire-reports/*.xml"
+    }
+  }
+}

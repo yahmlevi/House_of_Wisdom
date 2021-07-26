@@ -1,0 +1,118 @@
+pipeline {
+    agent any
+    stages {
+        stage('checkout') {
+            agent {
+                docker {
+                    image 'maven'
+                    //LINUX/MAC OS
+                    //args '-v /var/run/docker.sock:/var/run/docker.sock'
+                    // WIN MACHINE
+                    // args '-v ${PWD}/app:/root/app'
+                }
+            }
+            steps {
+                echo 'CHECKOUT STAGE'
+                sh 'ls -l'
+                git branch: 'main', url: 'https://github.com/yahmlevi/maven_project.git'
+                sh 'ls -l'
+                stash name: 'pom', includes: 'pom.xml'
+                stash name: 'src', includes: 'src/'
+            }
+        }
+        stage('build') {
+            agent {
+                docker {
+                    image 'maven'
+                    args '-v ${PWD}/app:/root/app'
+                }
+            }
+            steps {
+                echo 'BUILD STAGE'
+                sh 'ls -l'
+                //unstash 'pom'
+                unstash 'src'
+                sh 'ls -l'
+                sh 'mvn --version'
+                sh 'mvn compile --quiet'
+                echo 'FINISH COMPILE'
+                sh 'ls -l'
+                sh 'ls -l target'
+            }
+        }
+        stage('test') {
+            agent {
+                docker {
+                    image 'maven'
+                    args '-v ${PWD}:/root'
+                }
+            }
+            steps {
+                echo 'TEST STAGE'
+                sh 'mvn test'
+                echo 'FINISH TEST'
+                sh 'ls -l'
+                sh 'ls -l target'
+            }
+        }
+        stage('package') {
+            agent {
+                docker {
+                    image 'maven'
+                    args '-v ${PWD}:/root'
+                }
+            }
+            steps {
+                echo "PACKAGE STAGE"
+                sh 'mvn package'
+                echo 'FINISH PACKAGE' 
+                sh 'ls -l'
+                sh 'ls -l target'
+            }
+        }
+        stage('archive') {
+            steps {
+                echo "ARCHIVE STAGE"
+                sh 'ls -l'
+                sh 'ls -l target'
+                archiveArtifacts artifacts: 'target/**/*.jar', fingerprint: true   
+                sh 'ls -l'
+                sh 'ls -l target'
+            }
+        }
+        stage('build app docker image') {
+            agent {
+                docker {
+                    image 'docker:dind'
+                    //LINUX/MAC OS
+                    //args '-v /var/run/docker.sock:/var/run/docker.sock'
+                    // WIN MACHINE
+                    args '-e DOCKER_HOST=tcp://host.docker.internal:2375 -v ${PWD}:/root'
+                }
+            }
+            steps {
+                echo 'build app docker image STAGE'
+                sh 'docker build --tag my-java-app-image .'
+            }
+        }
+        stage('clean') {
+            agent {
+                docker {
+                    image 'maven'
+                    args '-v ${PWD}:/root'
+                }
+            }
+            steps {
+                echo "CLEAN STAGE"   
+                sh 'mvn clean'
+                sh 'ls -l'
+            }
+        }
+    }
+    // post {
+    //     always {
+    //         deleteDir()
+    //     }
+    // }  
+}
+

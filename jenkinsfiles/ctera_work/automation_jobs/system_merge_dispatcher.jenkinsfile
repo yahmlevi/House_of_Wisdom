@@ -1,0 +1,46 @@
+pipeline {
+    agent {
+        node {
+            label 'CloudFS_Logger'
+        }
+    }
+    stages {
+        stage ('PrintBranch') {
+		    steps {
+		        script { 
+		            currentBuild.description = "$gitlab_branch"
+		        }
+            }
+        }
+        stage ('Merge') {
+            steps {
+                parallel (
+                    "Classic" : {
+                        build job: 'Systems_Merge_Classic_pipeline', parameters: [string(name: 'gitlab_branch', value: gitlab_branch)]
+                    },
+                    "Caching" : {
+                        build job: 'Systems_Merge_SyncGateway_pipeline', parameters: [string(name: 'gitlab_branch', value: gitlab_branch)]
+                    }
+				)
+			}
+		}
+		stage ('Post_Automation_Status') { 
+		    steps {
+		        script { 
+		            sh '''#!/bin/bash
+                    curl --request POST --header "PRIVATE-TOKEN: aK96u95gzW1TVRqN4xU_" http://git.ctera.local/api/v4/projects/16/merge_requests/$mr_iid/notes?body=MergeRequestAutomation=Success,http://jenkins.ctera.local/view/Automation/job/Systems_Merge_Dispatcher/${BUILD_NUMBER}/console  
+					'''
+		        }
+            }
+        }
+    }
+    post{
+		unsuccessful {
+			script{
+				    sh '''#!/bin/bash
+                    curl --request POST --header "PRIVATE-TOKEN: aK96u95gzW1TVRqN4xU_" http://git.ctera.local/api/v4/projects/16/merge_requests/$mr_iid/notes?body=MergeRequestAutomation=Failed,http://jenkins.ctera.local/view/Automation/job/Systems_Merge_Dispatcher/${BUILD_NUMBER}/console
+				    '''
+            }
+		}
+	}
+}

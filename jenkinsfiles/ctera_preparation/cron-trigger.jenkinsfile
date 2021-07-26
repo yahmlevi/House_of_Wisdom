@@ -1,0 +1,21 @@
+// https://stackoverflow.com/questions/12472645/how-do-i-schedule-jobs-in-jenkins
+// https://crontab.guru
+pipeline {
+  agent any
+  triggers {
+    cron('*/15 * * * *')
+  }
+  stages {
+    stage('Hello World') {
+      steps {
+        echo 'Hello World'
+      }
+    }
+    
+    stage('Hello World2') {
+      steps {
+        echo 'Hello World2'
+      }
+    }
+  }
+}

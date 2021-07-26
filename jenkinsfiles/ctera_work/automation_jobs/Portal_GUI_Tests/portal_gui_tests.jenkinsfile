@@ -1,0 +1,301 @@
+// block job when other jobs are running ("Agent_GUI_Tests","APP_GUI_Tests") must be done manually through UI. 
+
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+
+pipeline {
+    agent {
+        node { 
+            label "gui-agent-slave"
+        } 
+    }
+    options {
+        timeout(time: 360, unit: "MINUTES")
+        buildDiscarder(logRotator(numToKeepStr: "500", daysToKeepStr: "30"))
+    }
+    parameters {
+        choice(name: "Portal_Branch", choices: ["dev", "6.0"], description: "Portal_Branch")
+        choice(name: "Portal_Build", choices: ["Daily", "Hourly"], description: "Portal_Build")
+        string(name: "PORTAL_IP", defaultValue: "192.168.14.40", description: "IP or DNS name of the portal to be used")
+    }
+    stages {
+        stage("Prepare an environment for the run") {
+            steps {
+                setTitle("PREPARE ENVIRONMENT")
+
+                script{
+                    def first_props = readProperties  file: "GUI_Branch.txt"
+                    
+                    if ("${Portal_Branch}" == "dev") {
+                        PORTAL_GUI_BRANCH = "master"
+                    } else {
+                        PORTAL_GUI_BRANCH = "APP-${Portal_Branch}"
+                    }
+                    sh "echo ${PORTAL_GUI_BRANCH} > GUI_Branch.txt"
+                }
+            }
+        }
+        stage("Checkout") {
+            steps {
+                setTitle("CHECKOUT")
+
+                deleteDir()
+        
+                dir("Mock-Server") {
+                    git branch: "master", credentialsId: "0367fbd2-e744-4d9d-8bba-e5bf20bc115b", url: "http://git.ctera.local/GUI/Mock-Server.git"
+                }
+                dir("GUI") {
+                    git branch: "${PORTAL_GUI_BRANCH}", credentialsId: "0367fbd2-e744-4d9d-8bba-e5bf20bc115b", url: "http://git.ctera.local/GUI/GUI.git"
+                }
+                dir("DevOps_jenkins_jobs") {
+                    git branch: "master", credentialsId: "0367fbd2-e744-4d9d-8bba-e5bf20bc115b", url: "http://git.ctera.local/devops/jenkins_jobs.git"
+                }
+            }
+        }
+        stage("First bash scripts") {
+            steps {
+                setTitle("FIRST BASH SCRIPT")
+
+                script{
+                    if ("${Portal_Build}" == "Daily") {
+                        TEST_SUITE = "fullTest"
+                    } else {
+                        TEST_SUITE = "sanityTest"
+                    }
+                }
+                
+                sh '''
+                    for process in `sudo ps -ef | grep webdriver | grep -v grep | awk '{print $2}'`; do sudo kill -9 $process; done
+
+                    if [ "$Portal_Build" = "Daily" ]; then
+                        echo "TEST_SUITE=fullTest" > TEST_SUITE.conf
+                    else
+                        echo "TEST_SUITE=sanityTest" > TEST_SUITE.conf
+                    fi
+                    cd /home/jenkins/Portal_GUI_Tests/GUI/WebTools/tests/test-portal-protractor
+                    sed -i 's#\\"ctera-mock-server\\"\\:.*#\\"ctera-mock-server\\"\\:\\ \\"\\/home\\/jenkins\\/Portal_GUI_Tests\\/Mock-Server\\"#' package.json
+                    sed -i 's#backendPath.*#backendPath\\ \\:\\ \\"\\/home\\/jenkins\\/Portal_GUI_Tests\\/Backend\\"\\,#' env.conf.js
+                    sed -i 's#realServerAddress.*#realServerAddress\\:\\ \\"$PORTAL_IP\\"\\,#' env.conf.js
+                    sed -i 's#.*Mock-Server.*#\\ \\ \\ \\ \\ \\ \\"version\\"\\:\\ \\"file\\:\\/home\\/jenkins\\/Portal_GUI_Tests\\/Mock-Server\\"\\,#' package-lock.json
+                '''
+            }
+        }
+        stage("Second bash scripts") {
+            steps {
+                setTitle("SECOND BASH SCRIPT")
+
+                sh '''
+                    cd /home/jenkins/Portal_GUI_Tests/Mock-Server
+                    npm install
+                    cd /home/jenkins/Portal_GUI_Tests/GUI/WebTools/tests/test-portal-protractor
+                    npm install
+                    sudo webdriver-manager clean
+                    sudo webdriver-manager update
+                    webdriver-manager start &
+                    sleep 10
+                '''
+            }
+        }
+        stage("Third bash scripts") {
+            steps {
+                setTitle("THIRD BASH SCRIPT")
+                
+                sh '''
+                    cd /home/jenkins/Portal_GUI_Tests/
+                    mkdir -p Backend
+                    cd Backend
+                    rm -rf *
+                    cp /mnt/versions/Backend/${Portal_Build}_portal_${Portal_Branch}_gui.tar .
+                    tar xf ${Portal_Build}_portal_${Portal_Branch}_gui.tar
+                    rm -f ${Portal_Build}_portal_${Portal_Branch}_gui.tar
+
+                    for Backend_Path in `find . -name WebContent | grep target`; do 
+                        cd $Backend_Path
+                        cd ..
+                        mv WebContent ../
+                        cd /home/jenkins/Portal_GUI_Tests/Backend
+                    done
+                '''
+                script{
+                    def second_props = readProperties  file: "TestSuite.conf"
+                }
+            }
+        }
+        stage("First conditional step") {
+            steps {
+                script{
+                    setTitle("FIRST CONDITIONAL STEP")
+
+                    if ("${currentBuild.currentResult}" == "SUCCESS") {
+                        echo "CURRENT BUILD IS A SUCCESS"
+                        sh """
+                            cd /home/jenkins/Portal_GUI_Tests/GUI/WebTools/tests/test-portal-protractor
+                            npm run $TEST_SUITE
+                        """
+                    } else {
+                        echo "BUILD IS NOT SUCCESS - DIDN'T EXECUTE SCRIPT"
+                        // error("Build failed because condition is not met")
+                    }
+                }
+            }
+        }
+
+        stage("Fourth bash script") {
+            steps {
+                script{
+                    setTitle("FOURTH BASH SCRIPT")
+
+                    sh '''for process in `sudo ps -ef | grep webdriver | grep -v grep | awk '{print $2}'`; do sudo kill -9 $process; done'''
+                }
+            }
+        }
+        stage("Second conditional step") {
+            steps {
+                script{
+                    setTitle("SECOND CONDITIONAL STEP")
+
+                    if ("${Portal_Build}" == "Daily") {
+                        sh '''
+                            cd GUI
+                            export SONAR_SCANNER_OPTS="-Xmx2048m"
+                            sonar-scanner -Dsonar.projectKey=GUI-$PORTAL_GUI_BRANCH -Dsonar.projectVersion=Portal-$(date+%s) -Dsonar.sources=. -Dsonar.scm.provider=git -Dsonar.exclusions=admingui/common/shared/third-party/**,admingui/common/admin/third-party/**,admingui/common/portalbeta/third-party/**,WebTools/**,admingui/common/script/mozilla-pdf**/**,admingui/common/script/ext/ext-all.js,admingui/common/script/ext/adapter/**,admingui/common/script/ext/resources/**,admingui/common/admin/styles/css/**,admingui/common/shared/styles/sass/bootstrap/**,admingui/common/shared/styles/sass/angular-material/**,admingui/common/portalbeta/styles/sass/intl-tel-input/** -Dsonar.gitlab.url=http://git.ctera.local -Dsonar.gitlab.user_token=zNcsUzzod6Xnhr2Gf6Ey -Dsonar.gitlab.project_id=48 -Dsonar.gitlab.ref_name=$PORTAL_GUI_BRANCH -Dsonar.gitlab.query_max_retry=100 -Dsonar.gitlab.query_wait=3000
+                            sleep 30
+                        '''
+                        
+                        tmp_project_status = sh (returnStdout: true, script: "curl -u ba0eb8c043dbfe9389e334b7d3647918463736c4: http://sonar.ctera.local/api/qualitygates/project_status?projectKey=GUI-master | jq '.projectStatus.status'")
+                        env.PROJECTSTATUS = tmp_project_status
+                        
+                        tmp_NEW_VULNERABILITIES =   sh (returnStdout: true, script: 
+                                                        """
+                                                            curl -u 471654e5fc0909e43bcf361beb440687d4ae5aaf: "http://sonar.ctera.local/api/measures/search_history?metrics=new_bugs,new_vulnerabilities,new_code_smells,new_line_coverage&component=GUI-master" > ${WORKSPACE}/SonarMeasures.txt 
+                                                            cat ${WORKSPACE}/SonarMeasures.txt | jq ".measures[] | select(.metric == 'new_vulnerabilities') | .history[].value" | tail -1
+                                                        """
+                                                    )
+                        env.NEW_VULNERABILITIES = tmp_NEW_VULNERABILITIES
+
+                        tmp_NEW_BUGS =      sh (returnStdout: true, script: 
+                                                        ''' 
+                                                            curl -u 471654e5fc0909e43bcf361beb440687d4ae5aaf: "http://sonar.ctera.local/api/measures/search_history?metrics=new_bugs,new_vulnerabilities,new_code_smells,new_line_coverage&component=GUI-master" > $WORKSPACE/SonarMeasures.txt
+                                                            cat $WORKSPACE/SonarMeasures.txt | jq '.measures[] | select(.metric == "new_bugs") | .history[].value' | tail -1
+                                                        '''
+                                            )
+                        env.NEW_BUGS = tmp_NEW_BUGS
+
+                        tmp_NEW_CODE_SMELLS =   sh (returnStdout: true, script: 
+                                                        ''' 
+                                                            curl -u 471654e5fc0909e43bcf361beb440687d4ae5aaf: "http://sonar.ctera.local/api/measures/search_history?metrics=new_bugs,new_vulnerabilities,new_code_smells,new_line_coverage&component=GUI-master" > $WORKSPACE/SonarMeasures.txt
+                                                            cat $WORKSPACE/SonarMeasures.txt | jq '.measures[] | select(.metric == "new_code_smells") | .history[].value' | tail -1
+                                                        '''
+                                                )
+                        env.NEW_CODE_SMELLS = tmp_NEW_CODE_SMELLS
+
+                        tmp_NEW_LINE_COVARGE =  sh (returnStdout: true, script: 
+                                                        ''' 
+                                                            curl -u 471654e5fc0909e43bcf361beb440687d4ae5aaf: "http://sonar.ctera.local/api/measures/search_history?metrics=new_bugs,new_vulnerabilities,new_code_smells,new_line_coverage&component=GUI-master" > $WORKSPACE/SonarMeasures.txt
+                                                            cat $WORKSPACE/SonarMeasures.txt | jq '.measures[] | select(.metric == "new_line_coverage") | .history[].value' | tail -1
+                                                        '''
+                                                )
+                        env.NEW_LINE_COVARGE = tmp_NEW_LINE_COVARGE 
+                    } else {
+                        echo "PORTAL_Build var doesn't equal 'Daily'"
+                    }
+                }
+            }
+        }
+        stage("Fifth bash script") {
+            steps {
+                script{
+                    setTitle("FIFTH BASH SCRIPT")
+
+                    sh '''
+                        rm -rf sonar_issues.*
+                        curl -u 471654e5fc0909e43bcf361beb440687d4ae5aaf: "http://sonar.ctera.local/api/issues/search?componentRoots=GUI-master&sinceLeakPeriod=true" > $WORKSPACE/sonar_issues.txt
+                        cat $WORKSPACE/sonar_issues.txt | jq . > $WORKSPACE/sonar_issues.tmp
+                        mv $WORKSPACE/sonar_issues.tmp $WORKSPACE/sonar_issues.txt
+                        sed -i /\\"component\\"/s/"\\/"/'%2F'/g $WORKSPACE/sonar_issues.txt
+                        sed -i /\\"component\\"/s/"Portal-$BRANCH:"/"http\\:\\/\\/sonar\\.ctera\\.local\\/code\\?id\\=GUI\\-master\\&selected\\=GUI\\-master\\%3A"/g $WORKSPACE/sonar_issues.txt
+                    '''
+                }
+            }
+        }
+        stage("Python script") {
+            steps {
+                script{
+                    setTitle("PYTHON SCRIPT")
+
+                    sh "python DevOps_jenkins_jobs/Automation_Jobs/Portal_GUI_Tests/script.py"
+
+                    def third_props = readProperties  file: "${WORKSPACE}/Sonar_Quality.txt"
+                }
+            }
+        }
+        stage("Sixth bash script") {
+            steps {
+                script{
+                    setTitle("SIXTH BASH SCRIPT")
+
+                    echo "project status - ${env.PROJECTSTATUS}"
+                    if ("${env.PROJECTSTATUS}" == "\"OK\"") {
+                        echo "'PROJECTSTATUS' equls 'OK'"
+                    } else {
+                        echo "'PROJECTSTATUS' not equl 'OK'"
+                        sh '''
+                            echo Quality Gate for the projext is in failed state
+                            exit 1
+                        '''
+                    }
+                }
+            }
+        }
+    }
+    post {
+        always {
+            setTitle("POST ACTIONS")
+
+            // junit "GUI/WebTools/tests/test-portal-protractor/testresults/*.xml"
+            
+            script{
+                first_tmp = '''${JELLY_SCRIPT,template="html"}'''
+                second_tmp = '''${FILE,path="sonar_issues.html"}'''
+            }
+            
+            emailext ( 
+                replyTo: "jenkins@ctera.com",
+                to: "yahml@ctera.com",
+                // to: "zvi@ctera.com, moshe@ctera.com",
+                mimeType: 'text/html',
+                body: """
+                    <h1 style="color:blue;"><b><i>SonarQube Quality Gate Portal-GUI results</i></b> <BR></h1>
+                    <table style="width:35%">
+                    <tr>
+                    <td><h2>Project Status </h2></th>
+                    <td><h2>PROJECTSTATUS</h2></th> 
+                    </tr>
+                    <tr>
+                    <td>Vulnerabilities </td>
+                    <td>${NEW_VULNERABILITIES} </td>
+                    </tr>
+                    <tr>
+                    <td>Bugs </td>
+                    <td>${NEW_BUGS} </td>
+                    </tr>
+                    <tr>
+                    <td>Code smells</td>
+                    <td>${NEW_CODE_SMELLS}</td>
+                    </tr>
+                    <tr>
+                    <td>Line coverage </td>
+                    <td>${NEW_LINE_COVARGE} </td>
+                    </tr>
+                    </table>
+                    ${first_tmp}
+                    ${second_tmp}
+                    """,
+                subject: "Portal ${Portal_Branch} GUI Tests - ${currentBuild.currentResult}"  // Portal ${Portal_Branch} GUI Tests - ${TEST_SUITE} - ${BUILD_STATUS}  // $PROJECTSTATUS
+            )
+        }
+    }
+}

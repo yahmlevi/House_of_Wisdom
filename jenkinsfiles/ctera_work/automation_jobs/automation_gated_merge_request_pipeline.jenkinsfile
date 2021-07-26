@@ -1,0 +1,183 @@
+def resultIcon 
+
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+
+pipeline {
+    agent {
+        node {
+            label 'master'
+        }
+    }
+    options {
+        buildDiscarder(logRotator(daysToKeepStr: '10', numToKeepStr: '10'))
+    }
+    stages {
+        stage("Checkout") {
+			steps{
+                setTitle("CHECKOUT")
+
+			    checkout([
+                	$class: 'GitSCM', 
+                	branches: [[name: 'origin/${gitlabSourceBranch}']], 
+                	doGenerateSubmoduleConfigurations: false, 
+                	extensions: [
+                		[$class: 'PreBuildMerge', 
+                		options: [
+                			mergeRemote: 'origin', 
+                			mergeTarget: '${gitlabTargetBranch}'
+                			]
+                		], 
+                		[$class: 'RelativeTargetDirectory', relativeTargetDir: 'Automation'],
+                		[$class: 'CloneOption', depth: 0, noTags: false, reference: '', shallow: false, timeout: 30], 
+                		[$class: 'CheckoutOption', timeout: 30]], submoduleCfg: [], 
+                		userRemoteConfigs: [
+                			[
+                				credentialsId: '0367fbd2-e744-4d9d-8bba-e5bf20bc115b', 
+                				name: 'origin', 
+                				refspec: '+refs/heads/*:refs/remotes/origin/* +refs/merge-requests/*/head:refs/remotes/origin/merge-requests/*', 
+                				url: 'http://git.ctera.local/Automation/Automation.git'
+                			]
+                		]
+                	]
+                )
+            }
+        }
+        stage("Maven Clean - Automation/automation-core"){
+            steps{
+                setTitle("Maven Clean - Automation/automation-core")
+
+                sh  "mvn clean install -f Automation/automation-core/pom.xml"
+            }
+        }
+        stage("Maven Clean - Automation/vi-management"){
+            steps{
+                setTitle("Maven Clean - Automation/vi-management")
+
+                sh  "mvn clean install -f Automation/vi-management/pom.xml"
+            }
+        }
+        stage("Maven Clean - Automation/automation-api"){
+            steps{
+                setTitle("Maven Clean - Automation/automation-api")
+
+                sh  "mvn clean install -f Automation/automation-api/pom.xml -DskipTests=true"
+            }
+        }
+        stage("Maven Clean - Automation/automation-tests"){
+            steps{
+                setTitle("Maven Clean - Automation/automation-tests")
+
+                sh  "mvn clean install -f Automation/automation-tests/pom.xml -DskipTests=true"
+            }
+        }
+    }
+	post{
+		always {
+            script{
+              resultIcon = currentBuild.currentResult == 'SUCCESS' ? ':white_check_mark:' : ':anguished:'
+            }
+            addGitLabMRComment comment: "${resultIcon} Jenkins Build ${currentBuild.currentResult} \n\nResults available at: [Jenkins [${env.JOB_NAME}#${env.BUILD_NUMBER}]](${env.BUILD_URL})"
+            script{
+                sh '''
+                    echo "************ Deleting branches that had been merged 4 weeks ago *************"
+                    cd ${WORKSPACE}/Automation
+                    git remote update origin --prune
+                    for branch in $(git branch -r --merged origin/dev | grep -v HEAD); 
+                    do 
+                    if [ -z "$(git log -1 --since='4 week ago' -s $branch)" ]; 
+                    then
+                        echo "branch to be deleted:" `git show --format="%ci %cr" $branch | head -n 1` \\t$branch;
+                        local_branch=$(echo $branch | cut -d / -f2)
+                        git branch $local_branch
+                        git branch -d $local_branch  # -d delete branch
+                        git push origin --delete $local_branch # delete remote branch as well
+                    fi
+                    done | sort -r
+                '''
+            }
+		}
+	}
+}
+
+
+
+
+// def resultIcon 
+
+// pipeline {
+//     agent {
+//         node {
+//             label 'master'
+//         }
+//     }
+//     stages {
+//         stage('Git') {
+// 			steps{ 	
+// 			    checkout([
+//                 	$class: 'GitSCM', 
+//                 	branches: [[name: 'origin/${gitlabSourceBranch}']], 
+//                 	doGenerateSubmoduleConfigurations: false, 
+//                 	extensions: [
+//                 		[$class: 'PreBuildMerge', 
+//                 		options: [
+//                 			mergeRemote: 'origin', 
+//                 			mergeTarget: '${gitlabTargetBranch}'
+//                 			]
+//                 		], 
+//                 		[$class: 'RelativeTargetDirectory', relativeTargetDir: 'Automation'],
+//                 		[$class: 'CloneOption', depth: 0, noTags: false, reference: '', shallow: false, timeout: 30], 
+//                 		[$class: 'CheckoutOption', timeout: 30]], submoduleCfg: [], 
+//                 		userRemoteConfigs: [
+//                 			[
+//                 				credentialsId: '0367fbd2-e744-4d9d-8bba-e5bf20bc115b', 
+//                 				name: 'origin', 
+//                 				refspec: '+refs/heads/*:refs/remotes/origin/* +refs/merge-requests/*/head:refs/remotes/origin/merge-requests/*', 
+//                 				url: 'http://git.ctera.local/Automation/Automation.git'
+//                 			]
+//                 		]
+//                 	]
+//                 )
+//     		script{
+//     				sh  ''' mvn clean install -f Automation/automation-core/pom.xml 
+//     				        mvn clean install -f Automation/vi-management/pom.xml
+//     				        mvn clean install -f Automation/automation-api/pom.xml -DskipTests=true
+//     				        mvn clean install -f Automation/automation-tests/pom.xml -DskipTests=true
+//     					'''
+//     			}	
+    			
+//             }
+// 		} 
+//     }
+// 	post{
+// 		always {
+//             script{
+//               resultIcon = currentBuild.currentResult == 'SUCCESS' ? ':white_check_mark:' : ':anguished:'
+//             }
+//             addGitLabMRComment comment: "$resultIcon Jenkins Build $currentBuild.currentResult \n\nResults available at: [Jenkins [$env.JOB_NAME#$env.BUILD_NUMBER]]($env.BUILD_URL)"
+//             script{
+//                 sh '''
+//                 echo "************ Deleting branches that had been merged 4 weeks ago *************"
+//                 cd ${WORKSPACE}/Automation
+//                 git remote update origin --prune
+//                 for branch in $(git branch -r --merged origin/dev | grep -v HEAD); 
+//                 do 
+//                   if [ -z "$(git log -1 --since='4 week ago' -s $branch)" ]; 
+//                   then
+//                     echo "branch to be deleted:" `git show --format="%ci %cr" $branch | head -n 1` \\t$branch;
+//                     local_branch=$(echo $branch | cut -d / -f2)
+//                     git branch $local_branch
+//                 	git branch -d $local_branch  # -d delete branch
+//                     git push origin --delete $local_branch # delete remote branch as well
+//                   fi
+//                 done | sort -r
+//                 '''
+//             }
+// 		}
+// 	}
+		
+// }
+

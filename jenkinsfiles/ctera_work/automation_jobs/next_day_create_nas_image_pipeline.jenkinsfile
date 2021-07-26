@@ -1,0 +1,42 @@
+// project-based security can't be implemented by a pipeline, has to be manual through UI
+
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+
+pipeline {
+  
+    agent any
+  
+    options {
+        timestamps ()
+    }
+    stages {
+        stage("Initial stage") {
+            steps {
+                setTitle("INITIAL STAGE")
+              
+                deleteDir()
+            }
+        }
+        stage ('Starting job') {
+            steps {
+                setTitle("STARTING JOB")
+
+                build job: "Genesis_Create_NAS_Image",
+                parameters:
+                [[$class: 'StringParameterValue', name: "CTB_PATCH_BASE_VERSION", value: "7.0.1720"],
+                [$class: 'StringParameterValue', name: "EMAIL_RELEASE_NOTES", value: "false"],
+                [$class: 'StringParameterValue', name: "NAS_IMAGE_RELEASE_PREFIX", value: "6.9"],
+                [$class: 'StringParameterValue', name: "PATCH_GIT_NAS", value: "next_day_branch_1"],
+                [$class: 'StringParameterValue', name: "PATCH_OVERRIDE_VERSION_PREFIX", value: "true"],
+                [$class: 'StringParameterValue', name: "BUILD_LEGACY", value: "false"],
+                [$class: 'StringParameterValue', name: "SKIP_AUTOMATION", value: "true"],
+                [$class: 'StringParameterValue', name: "BUILD_6_9_BRANCH", value: "true"],
+                [$class: 'StringParameterValue', name: "BUILD_SIMULATOR", value: "false"]]
+            }
+        }
+    }
+}

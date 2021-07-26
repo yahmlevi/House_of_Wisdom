@@ -1,0 +1,22 @@
+# source: 
+# Jenkins Environment using Docker
+# https://joachim8675309.medium.com/jenkins-environment-using-docker-6a12603ebf9
+
+version: "2"
+services:
+  jenkins:
+    # image: jenkinsci/blueocean
+    # image: jenkins/jenkins:lts #docker not found
+    image: jenkins-docker-test
+    environment:
+      #### WINDOWS ONLY ####
+      # We have to run this as root, as the jenkins user cannot access the host.docker.internal address, only root can. 
+      # 
+      - DOCKER_HOST=tcp://host.docker.internal:2375
+    user: root
+    ports:
+      - "8080:8080"
+      - "8443:8443"
+      - "50000:50000"
+    volumes:
+      - ./jenkins_data:/var/jenkins_home

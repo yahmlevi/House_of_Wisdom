@@ -1,0 +1,138 @@
+// project-based security can't be implemented by a pipeline, has to be manual through UI
+// timestamp format can be changed throguh UI
+
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+
+pipeline {
+    agent {
+        node { 
+            label "CloudFS_Logger"
+            customWorkspace "/media/newdrive/AppAgentDaily"
+        } 
+    }
+    parameters {
+        string(name: "APPLIANCE_VERSION", defaultValue: "", description: "APPLIANCE_VERSION")
+        string(name: "APPLIANCE_IP", defaultValue: "192.168.18.117", description: "APPLIANCE_IP")
+        choice(name: "APPLIANCE_TYPE", choices: ["Genesis", "Kirkwood", "arm", "X86"], description: "")
+        string(name: "APPLIANCE_ADMIN_USER", defaultValue: "admin", description: "")
+        string(name: "APPLIANCE_ADMIN_PASSWORD", defaultValue: "password1!", description: "")
+        string(name: 'APPLIANCE_NAME', defaultValue: 'vGateway-8b61', description: '')
+        string(name: "APPLIANCE_DEFAULT_GATEWAY", defaultValue: "192.168.9.1", description: "")
+        string(name: "APPLIANCE_NETMASK", defaultValue: "255.255.255.0", description: "")
+        string(name: "PORTAL_IP", defaultValue: "192.168.18.111", description: "")
+        string(name: "PORTAL_CLI_USER", defaultValue: "root", description: "")
+        string(name: "PORTAL_CLI_PASSWORD", defaultValue: "ctera321", description: "")
+        string(name: "PORTAL_LICENSE", defaultValue: "DPF44-FE11E-70250-7830E-SC350-WC350-JC350-UC350-LC350-GC350-HC350-IC350-KC350-V1R1", description: "")
+        string(name: "PORTAL_CERTIFICATE_LOCATION", defaultValue: "ctera_me_2020.zip", description: "")
+        string(name: "PORTAL_DNS_SUFFIX", defaultValue: "ctera.me", description: "")
+        string(name: "PORTAL_ADMIN_USER", defaultValue: "admin", description: "")
+        string(name: "PORTAL_ADMIN_PASSWORD", defaultValue: "password1!", description: "")
+        string(name: "APPLIANCE_OLD_VERSION", defaultValue: "5.6.291", description: "")
+        string(name: "APPLIANCE_FIRST_RAID", defaultValue: "linear", description: "")
+        string(name: "APPLIANCE_SECOND_RAID", defaultValue: "linear", description: "")
+        string(name: "AGENT_IP", defaultValue: "192.168.82.61", description: "")
+        string(name: "AGENT_MACHINE_USER", defaultValue: "qa", description: "")
+        string(name: "AGENT_MACHINE_PASSWORD", defaultValue: "auto123!", description: "")
+        string(name: "AGENT_MACHINE_NAME", defaultValue: "App-Sanity-Agt", description: "")
+        string(name: "AGENT_VERSION", defaultValue: "6.0.169", description: "")
+    }
+    options {
+        buildDiscarder(logRotator(daysToKeepStr: '30', numToKeepStr: '500'))
+        timestamps ()
+    }
+    stages {
+        stage("Checkout") {
+            steps {
+                setTitle("CHECKOUT")
+
+                dir("ApplianceSanity"){
+                    checkout([  $class: "GitSCM", branches: [[name: "dev"]],
+                    extensions: [[$class: "GitLFSPull"]], userRemoteConfigs: [[credentialsId: "0367fbd2-e744-4d9d-8bba-e5bf20bc115b",
+                    url: "http://git.ctera.local/Automation/Automation.git"]]])
+                }
+            }
+        }
+
+        stage("First shell script") {
+            steps {
+                setTitle("FIRST SHELL SCRIPT")
+
+                sh '''
+                    cd ApplianceSanity/automation-tests
+                    cp defaults-params.ini params.ini
+
+                    sed -i "s/^APPLIANCE_VERSION[ \\t]*=.*/APPLIANCE_VERSION= ${APPLIANCE_VERSION}/" params.ini
+                    sed -i "s/^APPLIANCE_IP[ \\t]*=.*/APPLIANCE_IP= ${APPLIANCE_IP}/" params.ini
+                    sed -i "s/^APPLIANCE_TYPE[ \\t]*=.*/APPLIANCE_TYPE= ${APPLIANCE_TYPE}/" params.ini
+                    sed -i "s/^APPLIANCE_ADMIN_PASSWORD[ \\t]*=.*/APPLIANCE_ADMIN_PASSWORD = ${APPLIANCE_ADMIN_PASSWORD}/" params.ini
+                    sed -i "s/^APPLIANCE_ADMIN_USER[ \\t]*=.*/APPLIANCE_ADMIN_USER= ${APPLIANCE_ADMIN_USER}/" params.ini
+                    sed -i "s/^APPLIANCE_NAME[ \\t]*=.*/APPLIANCE_NAME= ${APPLIANCE_NAME}/" params.ini
+                    sed -i "s/^APPLIANCE_NETMASK[ \\t]*=.*/APPLIANCE_NETMASK= ${APPLIANCE_NETMASK}/" params.ini
+                    sed -i "s/^APPLIANCE_DEFAULT_GATEWAY[ \\t]*=.*/APPLIANCE_DEFAULT_GATEWAY= ${APPLIANCE_DEFAULT_GATEWAY}/" params.ini
+                    sed -i "s/^APPLIANCE_FIRST_RAID[ \\t]*=.*/APPLIANCE_FIRST_RAID= ${APPLIANCE_FIRST_RAID}/" params.ini
+                    sed -i "s/^APPLIANCE_SECOND_RAID[ \\t]*=.*/APPLIANCE_SECOND_RAID= ${APPLIANCE_SECOND_RAID}/" params.ini
+
+                    sed -i "s/^PORTAL_IP[ \\t]*=.*/PORTAL_IP= ${PORTAL_IP}/" params.ini
+                    sed -i "s/^PORTAL_CLI_USER[ \\t]*=.*/PORTAL_CLI_USER= ${PORTAL_CLI_USER}/" params.ini
+                    sed -i "s/^PORTAL_CLI_PASSWORD[ \\t]*=.*/PORTAL_CLI_PASSWORD= ${PORTAL_CLI_PASSWORD}/" params.ini
+                    sed -i "s/^PORTAL_LICENSE[ \\t]*=.*/PORTAL_LICENSE= ${PORTAL_LICENSE}/" params.ini
+                    sed -i "s/^PORTAL_CERTIFICATE_LOCATION[ \\t]*=.*/PORTAL_CERTIFICATE_LOCATION= ${PORTAL_CERTIFICATE_LOCATION}/" params.ini
+                    sed -i "s/^PORTAL_DNS_SUFFIX[ \\t]*=.*/PORTAL_DNS_SUFFIX= ${PORTAL_DNS_SUFFIX}/" params.ini
+                    sed -i "s/^PORTAL_ADMIN_USER[ \\t]*=.*/PORTAL_ADMIN_USER= ${PORTAL_ADMIN_USER}/" params.ini
+                    sed -i "s/^PORTAL_ADMIN_PASSWORD[ \\t]*=.*/PORTAL_ADMIN_PASSWORD= ${PORTAL_ADMIN_PASSWORD}/" params.ini
+                    sed -i "s/^AGENT_IP[ \\t]*=.*/AGENT_IP= ${AGENT_IP}/" params.ini
+                    sed -i "s/^AGENT_MACHINE_USER[ \\t]*=.*/AGENT_MACHINE_USER= ${AGENT_MACHINE_USER}/" params.ini
+                    sed -i "s/^AGENT_MACHINE_PASSWORD[ \\t]*=.*/AGENT_MACHINE_PASSWORD= ${AGENT_MACHINE_PASSWORD}/" params.ini
+                    sed -i "s/^AGENT_MACHINE_NAME[ \\t]*=.*/AGENT_MACHINE_NAME= ${AGENT_MACHINE_NAME}/" params.ini
+                    sed -i "s/^AGENT_VERSION[ \\t]*=.*/AGENT_VERSION= ${AGENT_VERSION}/" params.ini
+                '''
+            }
+        }
+        stage("Maven Clean - ApplianceSanity/automation-core") {
+            steps {
+                setTitle("Maven Clean - ApplianceSanity/automation-core")
+
+                sh "mvn clean install -Dmaven.repo.local=.repository -f ApplianceSanity/automation-core/pom.xml -DskipTests=true"
+            }
+        }
+        stage("Maven Clean - ApplianceSanity/vi-management") {
+            steps {
+                setTitle("Maven Clean - ApplianceSanity/vi-management")
+
+                sh "mvn clean install -Dmaven.repo.local=.repository -f ApplianceSanity/vi-management/pom.xml -DkipTests=true"
+            }
+        }
+        stage("Maven Clean - ApplianceSanity/automation-api") {
+            steps {
+                setTitle("Maven Clean - ApplianceSanity/automation-api")
+
+                sh "mvn clean install -Dmaven.repo.local=.repository -f ApplianceSanity/automation-api/pom.xml -DskipTests=true"
+            }
+        }
+        stage("Maven Clean - ApplianceSanity/automation-tests") {
+            steps {
+                setTitle("Maven Clean - ApplianceSanity/automation-tests")
+
+                sh '''mvn clean test -Dmaven.repo.local=.repository -f ApplianceSanity/automation-tests/pom.xml -Dtest=ApplianceSanityScenarios -Dmaven.test.failure.ignore=true'''    
+            }
+        }
+    }
+    post {
+        always {
+            setTitle("POST STAGE")
+        
+            junit "ApplianceSanity/automation-tests/target/surefire-reports/*.xml"
+            
+            emailext ( 
+                replyTo: "jenkins@ctera.com",
+                to: "yaniv@ctera.com, adi@ctera.com, meir@ctera.com, boris@ctera.com, idan@ctera.com",
+                body: "${currentBuild.currentResult}: Job ${env.JOB_NAME} build ${env.BUILD_NUMBER}\n More info at: ${env.BUILD_URL}",
+                subject: "Appliance Sanity Result - ${APPLIANCE_VERSION}"
+            )
+        }
+    }
+}

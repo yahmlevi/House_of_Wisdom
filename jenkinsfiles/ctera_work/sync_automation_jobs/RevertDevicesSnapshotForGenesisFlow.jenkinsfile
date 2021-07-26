@@ -1,0 +1,77 @@
+// project-based security can't be implemented by a pipeline, has to be manual through UI
+
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+
+pipeline {
+    agent {
+        node { 
+            label "CloudFS_Minion"
+        } 
+    }
+    options {
+        buildDiscarder(logRotator(daysToKeepStr: "30"))
+        timestamps ()
+    }
+    stages {
+        stage("First vSphere build step") {
+            steps {
+                setTitle("First vSphere step")
+                
+                vSphere buildStep: [$class: 'RevertToSnapshot', snapshotName: 'StartFlow', vm: 'CloudSyncRegression - GenesisFlow - Device'], serverName: 'vSphere1'
+            }
+        }
+        stage("Second vSphere build step") {
+            steps {
+                setTitle("Second vSphere step")
+                
+                vSphere buildStep: [$class: 'PowerOn', timeoutInSeconds: 300, vm: 'CloudSyncRegression - GenesisFlow - Device'], serverName: 'vSphere1'
+            }
+        }
+        stage("Third vSphere build step") {
+            steps {
+                setTitle("Third vSphere step")
+                
+                vSphere buildStep: [$class: 'RevertToSnapshot', snapshotName: 'StartFlow', vm: 'CloudSyncRegression - GenesisFlow - Device - fastDR'], serverName: 'vSphere1'
+            }
+        }
+        stage("Fourth vSphere build step") {
+            steps {
+                setTitle("Fourth vSphere step")
+                
+                vSphere buildStep: [$class: 'PowerOn', timeoutInSeconds: 300, vm: 'CloudSyncRegression - GenesisFlow - Device - fastDR'], serverName: 'vSphere1'
+            }
+        }
+        stage("Fifth vSphere build step") {
+            steps {
+                setTitle("Fifth vSphere step")
+                
+                vSphere buildStep: [$class: 'RevertToSnapshot', snapshotName: 'StartFlow', vm: 'CloudSyncRegression - GenesisFlow - DirectAzure - Device'], serverName: 'vSphere1'
+            }
+        }
+        stage("Sixth vSphere build step") {
+            steps {
+                setTitle("Sixth vSphere step")
+                
+                vSphere buildStep: [$class: 'PowerOn', timeoutInSeconds: 300, vm: 'CloudSyncRegression - GenesisFlow - DirectAzure - Device'], serverName: 'vSphere1'
+            }
+        }
+        stage("Seventh vSphere build step") {
+            steps {
+                setTitle("Seventh vSphere step")
+                
+                vSphere buildStep: [$class: 'RevertToSnapshot', snapshotName: 'StartFlow', vm: 'CloudSyncRegression - GenesisFlow - DirectS3 - Device'], serverName: 'vSphere1'
+            }
+        }
+        stage("Eighth vSphere build step") {
+            steps {
+                setTitle("Eighth vSphere step")
+                
+                vSphere buildStep: [$class: 'PowerOn', timeoutInSeconds: 300, vm: 'CloudSyncRegression - GenesisFlow - DirectS3 - Device'], serverName: 'vSphere1'
+            }
+        }
+    }
+}

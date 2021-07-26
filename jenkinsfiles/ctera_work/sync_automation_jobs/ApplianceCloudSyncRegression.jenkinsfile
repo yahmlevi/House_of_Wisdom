@@ -1,0 +1,322 @@
+// project-based security can't be implemented by a pipeline, has to be manual through UI
+
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+
+
+pipeline {
+    agent {
+        node { 
+        label "CloudFS_Logger"
+        } 
+    }
+    options {
+        buildDiscarder(logRotator(numToKeepStr: "20"))
+        timestamps ()
+    }
+    parameters {
+        
+        gitParameter name: "GitBranch", 
+            type: "PT_BRANCH_TAG",
+            branchFilter: "origin/(.*)",
+            defaultValue: "dev",
+            selectedValue: "DEFAULT",
+            sortMode: "NONE",
+            useRepository: "http://git.ctera.local/Automation/Automation.git", 
+			description: "GIT Branch or Version tag to build from"
+        
+        choice(name: "TestSuite", choices: ["appliance_caching", "S3_appliance_caching", "Azure_appliance_caching", "appliance"], description: "TestSuite")
+        choice(name: "TestType", choices: ["CloudSyncRegressionScenario", "CloudSyncRegressionNotConcurrencySuite", "CloudSyncRegressionDeviceMainScenario", "CloudSyncRegressionWithDirectScenario"], description: "choose scenario to run")
+        string(name: "PORTAL_VERSION", defaultValue: "", description: "PORTAL_VERSION")
+        string(name: "PORTAL_IP", defaultValue: "", description: "Portal to run on - for non-default execution. Parameter should be empty to run on the regular build server")
+        string(name: "PORTAL_USER", defaultValue: "admin", description: "Portal application administration user")
+        string(name: "PORTAL_PASS", defaultValue: "password1!", description: "Portal application administration password")
+        string(name: "PORTAL_SETUP", defaultValue: "false", description: "defines if to init the portal or not. if init is needed, need to set value to true")
+        string(name: "VIRTUAL_PORTAL_NAME", defaultValue: "", description: "VIRTUAL_PORTAL_NAME")
+        string(name: "APPLIANCE_VERSION", defaultValue: "", description: "APPLIANCE_VERSION")
+        string(name: "APPLIANCE_IP", defaultValue: "192.168.17.147", description: "Appliance to run on - for non-default execution. Parameter should be empty to run on the regular build server")
+        string(name: "APPLIANCE_NAME", defaultValue: "", description: "Appliance to run on - for non-default execution. Parameter should be empty to run on the regular build server")
+        string(name: "APPLIANCE_USER", defaultValue: "admin", description: "APPLIANCE_USER")
+        string(name: "APPLIANCE_PASS", defaultValue: "password1!", description: "APPLIANCE_PASS")
+        string(name: "APPLIANCE_TYPE", defaultValue: "", description: "valid options should be: X86, Genesis, arm or Kirkwood")
+        choice(name: "APPLIANCE_ALLOW_UPGRADE", choices: ["true", "false"], description: "Choose 'false' to avoid Appliance upgrade. Otherwise choose true.")
+        string(name: "APPLIANCE_FIRST_RAID", defaultValue: "linear", description: "Value should be as follows: 1 - for c200, 5 - for c400/c800, linear - for vGateway")
+        string(name: "WIN_IP", defaultValue: "", description: "IP address of windows machine for ACL tests")
+        string(name: "WIN_USER", defaultValue: "qa", description: "Windows machine username, for ACL tests")
+        string(name: "WIN_PASSWORD", defaultValue: "auto123!", description: "Windows machine password, for ACL tests")
+        choice(name: "MAVEN_EXEC_MODE", choices: ["test", "-Dmaven.surefire.debug test"], description: "MAVEN_EXEC_MODE")
+        choice(name: "FlowToRun", choices: ["App", "Portal", "Dev"], description: "flag which param_ini to take")
+        choice(name: "BEFORE_AFTER_OPERATION", choices: ["SuspendMarkForFullScanAndUnsuspend", "SuspendAndUnsuspend"], description: "BEFORE_AFTER_OPERATION")
+        string(name: "APPLIANCE_FIRM_URL", defaultValue: "auto123!", description: "URL of private firmware on cterashared (to be used instead of APPLIANCE_VERSION). URL syntax Example:  Server\\username\\foldername\\   for folder   \\cterashared\\Server\\username\\foldername. There should be one .firm file in the folder")
+        choice(name: "TOGGLES_ENABLE", choices: ["false", "true"], description: "TOGGLES_ENABLE")
+        choice(name: "ENABLE_RP", choices: ["false", "true"], description: "ENABLE_RP")
+    }
+    stages {
+        stage("Checkout") {
+            steps {
+                setTitle("CHECKOUT")
+
+                checkout([  $class: "GitSCM", branches: [[name: "${params.GitBranch}"]],
+                        extensions: [[$class: "GitLFSPull"]], userRemoteConfigs: [[credentialsId: "0367fbd2-e744-4d9d-8bba-e5bf20bc115b",
+                        url: "http://git.ctera.local/Automation/Automation.git"]]])
+            }
+        }
+        stage("Maven Clean - automation-core") {
+            steps {
+                setTitle("Maven Clean - automation-core")
+                
+                sh "mvn clean install -Dmaven.repo.local=.repository -f automation-core/pom.xml -DskipTests=true"
+            }
+        }
+        stage("Maven Clean - vi-management") {
+            steps {
+                setTitle("Maven Clean - vi-management")
+                
+                sh "mvn clean install -Dmaven.repo.local=.repository -f vi-management/pom.xml -DskipTests=true"
+            }
+        }
+        stage("Maven Clean - automation-api") {
+            steps {
+                setTitle("Maven Clean - automation-api")
+                
+                sh "mvn clean install -Dmaven.repo.local=.repository -f automation-api/pom.xml -DskipTests=true"
+            }
+        }
+        stage("First bash script") {
+            steps {
+                setTitle("FIRST BASH SCRIPT")
+                
+                sh '''
+                    cat /media/newdrive/SyncGatewayParams/$FlowToRun/params.ini_Portal | sed s/"PORTAL_ADMIN_USER.*"/"PORTAL_ADMIN_USER = $PORTAL_USER"/ | sed s/"PORTAL_ADMIN_PASSWORD.*"/"PORTAL_ADMIN_PASSWORD = $PORTAL_PASS"/ > ./automation-tests/syncParams.ini
+                    if [ "$PORTAL_IP" != "" ]; then sed -i s/"PORTAL_IP.*"/"PORTAL_IP = $PORTAL_IP"/ ./automation-tests/syncParams.ini; fi
+                    if [ "$PORTAL_VERSION" != "" ]; then sed -i s/"PORTAL_VERSION.*"/"PORTAL_VERSION = $PORTAL_VERSION"/ ./automation-tests/syncParams.ini; fi
+                    grep "^PORTAL_VERSION" ./automation-tests/syncParams.ini > versions
+                    sed -i s/"SETUP_NEEDED.*"/"SETUP_NEEDED = $PORTAL_SETUP"/ ./automation-tests/syncParams.ini
+                    if [ "$VIRTUAL_PORTAL_NAME" != "" ]; then sed -i s/"VIRTUAL_PORTAL_NAME.*"/"VIRTUAL_PORTAL_NAME = $VIRTUAL_PORTAL_NAME"/ ./automation-tests/syncParams.ini; fi
+                '''
+            }
+        }
+        stage("Second bash script") {
+            steps {
+                setTitle("SECOND BASH SCRIPT")
+
+                sh '''
+                    #!/bin/bash -xe
+
+                    echo "test is: $TestSuite***"
+
+                    if [ "$TestSuite" = "appliance" ]; then
+                        cat /media/newdrive/SyncGatewayParams/$FlowToRun/params.ini_App| sed s/"APPLIANCE_ADMIN_USER.*"/"APPLIANCE_ADMIN_USER = $APPLIANCE_USER"/ | sed s/"APPLIANCE_ADMIN_PASSWORD.*"/"APPLIANCE_ADMIN_PASSWORD = $APPLIANCE_PASS"/ >> ./automation-tests/syncParams.ini
+                        if [ "$APPLIANCE_IP" != "" ]; then sed -i s/"APPLIANCE_IP.*"/"APPLIANCE_IP = $APPLIANCE_IP"/ ./automation-tests/syncParams.ini; fi
+                        if [ "$APPLIANCE_NAME" != "" ]; then sed -i s/"APPLIANCE_NAME.*"/"APPLIANCE_NAME = $APPLIANCE_NAME"/ ./automation-tests/syncParams.ini; fi
+                        if [ "$APPLIANCE_TYPE" != "" ]; then sed -i s/"APPLIANCE_TYPE.*"/"APPLIANCE_TYPE = $APPLIANCE_TYPE"/ ./automation-tests/syncParams.ini; fi
+                        if [ "$APPLIANCE_FIRST_RAID" != "" ]; then sed -i s/"APPLIANCE_FIRST_RAID.*"/"APPLIANCE_FIRST_RAID = $APPLIANCE_FIRST_RAID"/ ./automation-tests/syncParams.ini; fi
+                        if [ "$TestType" = "CloudSyncRegressionDeviceMainScenario" ]; then sed -i s/"BEFORE_AFTER_OPERATION.*"/"BEFORE_AFTER_OPERATION = $BEFORE_AFTER_OPERATION"/ ./automation-tests/syncParams.ini; fi
+                    fi
+
+                    if [ "$TestSuite" = "appliance_caching" ]; then
+                        cat /media/newdrive/SyncGatewayParams/$FlowToRun/params.ini_AppCache | sed s/"APPLIANCE_ADMIN_USER.*"/"APPLIANCE_ADMIN_USER = $APPLIANCE_USER"/ | sed s/"APPLIANCE_ADMIN_PASSWORD.*"/"APPLIANCE_ADMIN_PASSWORD = $APPLIANCE_PASS"/ > app.tmp
+                        if [ "$APPLIANCE_IP" != "" ]; then sed -i s/"APPLIANCE_IP.*"/"APPLIANCE_IP = $APPLIANCE_IP"/ app.tmp; fi
+                        if [ "$APPLIANCE_NAME" != "" ]; then sed -i s/"APPLIANCE_NAME.*"/"APPLIANCE_NAME = $APPLIANCE_NAME"/ app.tmp; fi
+                        if [ "$APPLIANCE_TYPE" != "" ]; then sed -i s/"APPLIANCE_TYPE.*"/"APPLIANCE_TYPE = $APPLIANCE_TYPE"/ app.tmp; fi
+                        if [ "$APPLIANCE_FIRST_RAID" != "" ]; then sed -i s/"APPLIANCE_FIRST_RAID.*"/"APPLIANCE_FIRST_RAID = $APPLIANCE_FIRST_RAID"/ app.tmp; fi
+                        if [ "$APPLIANCE_ALLOW_UPGRADE" != "" ]; then sed -i s/"APPLIANCE_ALLOW_UPGRADE.*"/"APPLIANCE_ALLOW_UPGRADE = $APPLIANCE_ALLOW_UPGRADE"/ app.tmp; fi
+                        if [ "$APPLIANCE_FIRM_URL" != "" ]; then
+                            escaped=$(echo "$APPLIANCE_FIRM_URL" | sed 's;\\;\\\\;g')
+                            sed -i "s;APPLIANCE_FIRM_URL.*;APPLIANCE_FIRM_URL=$escaped;" app.tmp
+                        fi
+                        sed -i s/"TOGGLES_ENABLE.*"/"TOGGLES_ENABLE = $TOGGLES_ENABLE"/ ./automation-tests/syncParams.ini;
+                        cat app.tmp >> ./automation-tests/syncParams.ini
+                        if [ "$TestType" = "CloudSyncRegressionDeviceMainScenario" ]; then sed -i s/"BEFORE_AFTER_OPERATION.*"/"BEFORE_AFTER_OPERATION = $BEFORE_AFTER_OPERATION"/ ./automation-tests/syncParams.ini; fi
+                    fi
+
+                    if [ "$TestSuite" = "S3_appliance_caching" ]; then
+                        cat /media/newdrive/SyncGatewayParams/$FlowToRun/params.ini_S3AppCache | sed s/"APPLIANCE_ADMIN_USER.*"/"APPLIANCE_ADMIN_USER = $APPLIANCE_USER"/ | sed s/"APPLIANCE_ADMIN_PASSWORD.*"/"APPLIANCE_ADMIN_PASSWORD = $APPLIANCE_PASS"/ > app.tmp
+                        if [ "$APPLIANCE_IP" != "" ]; then sed -i s/"APPLIANCE_IP.*"/"APPLIANCE_IP = $APPLIANCE_IP"/ app.tmp; fi
+                        if [ "$APPLIANCE_NAME" != "" ]; then sed -i s/"APPLIANCE_NAME.*"/"APPLIANCE_NAME = $APPLIANCE_NAME"/ app.tmp; fi
+                        if [ "$APPLIANCE_TYPE" != "" ]; then sed -i s/"APPLIANCE_TYPE.*"/"APPLIANCE_TYPE = $APPLIANCE_TYPE"/ app.tmp; fi
+                        if [ "$APPLIANCE_FIRST_RAID" != "" ]; then sed -i s/"APPLIANCE_FIRST_RAID.*"/"APPLIANCE_FIRST_RAID = $APPLIANCE_FIRST_RAID"/ app.tmp; fi
+                        cat app.tmp >> ./automation-tests/syncParams.ini
+                        sed -i s/"PORTAL_IP.*"/"PORTAL_IP = 192.168.17.158"/ ./automation-tests/syncParams.ini;
+                        if [ "$PORTAL_IP" != "" ]; then sed -i s/"PORTAL_IP.*"/"PORTAL_IP = $PORTAL_IP"/ ./automation-tests/syncParams.ini; fi
+                        sed -i s/"PORTAL_VERSION.*"/"PORTAL_VERSION = 6.1.1279.2"/ ./automation-tests/syncParams.ini;
+                        sed -i s/"STORAGE_NODE.*"/"STORAGE_NODE = S3"/ ./automation-tests/syncParams.ini;
+                        sed -i s/"TOGGLES_ENABLE.*"/"TOGGLES_ENABLE = $TOGGLES_ENABLE"/ ./automation-tests/syncParams.ini;
+                    fi
+
+                    if [ "$TestSuite" = "Azure_appliance_caching" ]; then
+                        cat /media/newdrive/SyncGatewayParams/$FlowToRun/params.ini_AzureAppCache | sed s/"APPLIANCE_ADMIN_USER.*"/"APPLIANCE_ADMIN_USER = $APPLIANCE_USER"/ | sed s/"APPLIANCE_ADMIN_PASSWORD.*"/"APPLIANCE_ADMIN_PASSWORD = $APPLIANCE_PASS"/ > app.tmp
+                        if [ "$APPLIANCE_IP" != "" ]; then sed -i s/"APPLIANCE_IP.*"/"APPLIANCE_IP = $APPLIANCE_IP"/ app.tmp; fi
+                        if [ "$APPLIANCE_NAME" != "" ]; then sed -i s/"APPLIANCE_NAME.*"/"APPLIANCE_NAME = $APPLIANCE_NAME"/ app.tmp; fi
+                        if [ "$APPLIANCE_TYPE" != "" ]; then sed -i s/"APPLIANCE_TYPE.*"/"APPLIANCE_TYPE = $APPLIANCE_TYPE"/ app.tmp; fi
+                        if [ "$APPLIANCE_FIRST_RAID" != "" ]; then sed -i s/"APPLIANCE_FIRST_RAID.*"/"APPLIANCE_FIRST_RAID = $APPLIANCE_FIRST_RAID"/ app.tmp; fi
+                        cat app.tmp >> ./automation-tests/syncParams.ini
+                        sed -i s/"PORTAL_IP.*"/"PORTAL_IP = 192.168.17.62"/ ./automation-tests/syncParams.ini;
+                        if [ "$PORTAL_IP" != "" ]; then sed -i s/"PORTAL_IP.*"/"PORTAL_IP = $PORTAL_IP"/ ./automation-tests/syncParams.ini; fi
+                        sed -i s/"PORTAL_VERSION.*"/"PORTAL_VERSION = 6.1.1279.2"/ ./automation-tests/syncParams.ini;
+                        sed -i s/"STORAGE_NODE.*"/"STORAGE_NODE = Azure"/ ./automation-tests/syncParams.ini;
+                        sed -i s/"TOGGLES_ENABLE.*"/"TOGGLES_ENABLE = $TOGGLES_ENABLE"/ ./automation-tests/syncParams.ini;
+                    fi
+
+                    if [ "$WIN_IP" != "" ]; then sed -i s/"AGENT_IP.*"/"AGENT_IP = $WIN_IP"/ ./automation-tests/syncParams.ini; fi
+                    if [ "$WIN_USER" != "" ]; then sed -i s/"AGENT_MACHINE_USER.*"/"AGENT_MACHINE_USER = $WIN_USER"/ ./automation-tests/syncParams.ini; fi
+                    if [ "$WIN_PASSWORD" != "" ]; then sed -i s/"AGENT_MACHINE_PASSWORD.*"/"AGENT_MACHINE_PASSWORD = $WIN_PASSWORD"/ ./automation-tests/syncParams.ini; fi
+
+                    if [ "$APPLIANCE_VERSION" != "" ]; then
+                        sed -i s/"APPLIANCE_VERSION.*"/"APPLIANCE_VERSION = $APPLIANCE_VERSION"/g ./automation-tests/syncParams.ini
+                    fi
+
+                    grep "^APPLIANCE_VERSION" ./automation-tests/syncParams.ini >> versions
+                '''
+            }
+        }
+        stage("Third bash script") {
+            steps {
+                setTitle("THIRD BASH SCRIPT")
+
+                sh '''
+                    cd automation-tests/src/main/resources/
+                    sed -i s/"rp.enable.*"/"rp.enable = $ENABLE_RP"/ ./reportportal.properties
+                    sed -i s/"rp.skipped.issue.*"/"rp.skipped.issue = false"/ ./reportportal.properties
+
+                    if [ "$TOGGLES_ENABLE" = "true" ]; then
+                        sed -i s/"rp.launch.*"/"rp.launch = $TestSuite-TOGGLES_ENABLE"/ ./reportportal.properties
+                    else
+                        sed -i s/"rp.launch.*"/"rp.launch = $TestSuite"/ ./reportportal.properties
+                    fi
+
+                    case $FlowToRun in
+                        "App")
+                            sed -i 's/rp\.project.*/rp.project = cloudfs-genesis/' ./reportportal.properties
+                            ;;
+                            
+                        "Portal")
+                            sed -i 's/rp\.project.*/rp.project = cloudfs-portal/' ./reportportal.properties
+                            ;;
+
+                        *)
+                            sed -i 's/"rp.enable.*"/"rp.enable = false"/' ./reportportal.properties
+                            ;;
+                    esac
+
+                    echo "rp.description = $APPLIANCE_VERSION" >> ./reportportal.properties
+                    echo "rp.attributes = JBuild:$BUILD_NUMBER; Ver:$APPLIANCE_VERSION" >> ./reportportal.properties
+
+                    cat reportportal.properties
+                '''
+                script{
+                    def props = readProperties file: 'versions'
+                }
+            }
+        }
+        stage("First conditional step") {
+            steps {
+                script{
+                    setTitle("FIRST CONDITIONAL STEP")
+                    
+                    if ("${TestSuite}" != "portal_init") {
+                        sh '''mvn clean $MAVEN_EXEC_MODE -Dmaven.repo.local=.repository -f automation-tests/pom.xml -Dtest=$TestType -Dmaven.test.failure.ignore=true'''
+                    } else {
+                        echo "TestSuite equals 'portal_init'" 
+                        // error("Build failed because file - automation-tests/portalVersionFile.txt dosn't exsist")
+                    }
+                }
+            }
+        }
+        stage("Second conditional step") {
+            steps {
+                script{
+                    setTitle("SECOND CONDITIONAL STEP")
+                    
+                    if (fileExists("automation-tests/portalVersionFile.txt") && "${PORTAL_VERSION}" == "") {
+                        def second_props = readProperties  file: "automation-tests/portalVersionFile.txt"
+                    } else {
+                        echo "FILE (automation-tests/portalVersionFile.txt) DOESN'T EXSISTS. AND/OR PORTAL_VERSION PARAMETER NOT EQUALS EMPTY STRING" 
+                        // error("Build failed because condition is not met")
+                    }
+                }
+            }
+        }
+        stage("Third conditional step") {
+            steps {
+                script{
+                    setTitle("THIRD CONDITIONAL STEP")
+
+                    if ("${APPLIANCE_VERSION}" == "" && "${TestSuite}" != "portal_init") {
+                        sh '''
+                            if [ -f automation-tests/syncParams.ini ]; then
+                                grep ^AGENT_VERSION automation-tests/syncParams.ini > /dev/null
+                                if [ $? -eq 0 ]; then
+                                    echo "APPLIANCE_VERSION=$(grep ^APPLIANCE_VERSION automation-tests/syncParams.ini | tr -d ' ' | cut -d = -f2)" > AppVer_File.txt
+                                fi
+                            fi
+                        '''
+                        def third_props = readProperties  file: "AppVer_File.txt"
+                    } else {
+                        echo "APPLIANCE_VERSION not equals empty string AND/OR TestSuite equals 'portal_init'" 
+                        // error("Build failed because condition is not met")
+                    }
+                }
+            }
+        }
+        stage("Fourth bash script") {
+            steps {
+                setTitle("FOURTH BASH SCRIPT")
+
+                sh '''
+                    if [ "$PORTAL_VERSION" = "" ] && [ -f automation-tests/portalVersionFile.txt ]; then
+                        PORTAL_VERSION=$(grep PORTAL_VERSION automation-tests/portalVersionFile.txt | cut -d = -f2 | tr -d [:space:])
+                    fi 
+                    if [ "$APPLIANCE_VERSION" = "" ] && [ -f AppVer_File.txt ]; then
+                        APPLIANCE_VERSION=$(grep APPLIANCE_VERSION AppVer_File.txt | cut -d = -f2 | tr -d [:space:])
+                    fi 
+                    echo "PARAMS: APPLIANCE_VERSION=$APPLIANCE_VERSION PORTAL_VERSION=$PORTAL_VERSION TestSuite=$TestSuite TestType=$TestType"
+                '''
+            }
+        }
+        stage("Fifth bash script") {
+            steps {
+                setTitle("FIFTH BASH SCRIPT")
+
+                sh '''
+                    if [ "$TestSuite" = "appliance_caching" ]; 
+                    then
+                        sshpass -p password1! ssh -o "StrictHostKeyChecking=no" root@192.168.18.210  '/root/gitRep/Performance/scripts/support_report/get_support_report.sh '"$APPLIANCE_IP" "$JOB_BASE_NAME" "\"idan@ctera.com adi@ctera.com talm@ctera.com einat@ctera.com janny@ctera.com\""''
+                        sshpass -p password1! ssh -o "StrictHostKeyChecking=no" root@192.168.18.210  '/root/gitRep/Performance/scripts/support_report/get_portal_logs.sh '"$PORTAL_IP" "$JOB_BASE_NAME"''
+                    fi
+                    if [ "$TestSuite" = "S3_appliance_caching" ]; 
+                    then
+                        sshpass -p password1! ssh -o "StrictHostKeyChecking=no" root@192.168.18.210  '/root/gitRep/Performance/scripts/support_report/get_support_report.sh '"$APPLIANCE_IP" "$JOB_BASE_NAME" "\"idan@ctera.com adi@ctera.com talm@ctera.com einat@ctera.com janny@ctera.com\""''
+                        sshpass -p password1! ssh -o "StrictHostKeyChecking=no" root@192.168.18.210  '/root/gitRep/Performance/scripts/support_report/get_portal_logs.sh '"$PORTAL_IP" "$JOB_BASE_NAME"''
+                    fi
+                    if [ "$TestSuite" = "Azure_appliance_caching" ]; 
+                    then
+                        sshpass -p password1! ssh -o "StrictHostKeyChecking=no" root@192.168.18.210  '/root/gitRep/Performance/scripts/support_report/get_support_report.sh '"$APPLIANCE_IP" "$JOB_BASE_NAME" "\"idan@ctera.com adi@ctera.com talm@ctera.com einat@ctera.com janny@ctera.com\""''
+                        sshpass -p password1! ssh -o "StrictHostKeyChecking=no" root@192.168.18.210  '/root/gitRep/Performance/scripts/support_report/get_portal_logs.sh '"$PORTAL_IP" "$JOB_BASE_NAME"''
+                    fi
+                ''' 
+            }
+        }
+    }
+    post {
+        always {
+            setTitle("POST ACTIONS")
+
+            junit "automation-tests/target/surefire-reports/*.xml"
+
+            emailext (
+                replyTo: "jenkins@ctera.com",
+                to: "yahml@ctera.com",
+                // to: "adi@ctera.com, galb@ctera.com, einat@ctera.com, omer@ctera.com, pavelg@ctera.com, simont@ctera.com, idan@ctera.com, janny@ctera.com, olegc@ctera.com, yahml@ctera.com"
+                mimeType: 'text/html',
+                attachLog: true,
+                compressLog: true,
+                body: '''${JELLY_SCRIPT,template="html"}''',
+                subject: "${TestSuite} ${FlowToRun} Flow,  ${TestType} ${APPLIANCE_VERSION} Portal ${PORTAL_VERSION}"
+            )
+        }
+    }
+}

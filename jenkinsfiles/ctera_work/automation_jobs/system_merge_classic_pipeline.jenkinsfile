@@ -1,0 +1,154 @@
+// project-based security can't be implemented by a pipeline, has to be manual through UI
+
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+
+
+pipeline {
+  agent {
+     node { 
+        label "CloudFS_Logger"
+        } 
+  }
+  options {
+    timeout(time: 120, unit: "MINUTES")
+    buildDiscarder(logRotator(numToKeepStr: "30"))
+    timestamps ()
+  }
+  parameters {
+    string(name: "PortalIP", defaultValue: "192.168.18.98", description: "PortalIP")
+    string(name: "APPLIANCE_IP", defaultValue: "192.168.18.97", description: "APPLIANCE_IP")
+    string(name: "APPLIANCE_NAME", defaultValue: "vGateway-6e56", description: "APPLIANCE_NAME")
+    string(name: "gitlab_branch", description: "gitlab_branch")
+  }
+  stages {
+    stage("Checkout") {
+        steps {
+            setTitle("CHECKOUT")
+       
+            checkout([  $class: "GitSCM", branches: [[name: "origin/dev"]],
+                    extensions: [[$class: "GitLFSPull"]], userRemoteConfigs: [[credentialsId: "0367fbd2-e744-4d9d-8bba-e5bf20bc115b",
+                    url: "http://git.ctera.local/Automation/Automation.git"]]])
+        }
+    }
+    stage("First shell script") {
+      steps {
+        setTitle("FIRST SHELL SCRIPT")
+
+        sh '''
+          cp automation-tests/src/main/resources/paramsIni/jenkinsDefaultParamsVG.ini automation-tests/params.ini
+          cp automation-tests/src/main/resources/paramsIni/awkIniEditScript automation-tests/
+          cd automation-tests
+
+          rm -rf sleeps.log
+
+          perl -i -pe "s{^APPLIANCE_VERSION =.*}{++\\$n == 1 ? 'APPLIANCE_VERSION = ${APPLIANCE_VERSION:-7.0.1347}' : $&}ge" params.ini
+          perl -i -pe "s{^APPLIANCE_OLD_VERSION =.*}{++\\$n == 1 ? 'APPLIANCE_OLD_VERSION = ${APPLIANCE_OLD_VERSION:-7.0.1111.11}' : $&}ge" params.ini
+          perl -i -pe "s{^PORTAL_IP =.*}{++\\$n == 1 ? 'PORTAL_IP = ${PORTAL_IP}' : $&}ge" params.ini
+
+          sed -i "s|^AGENT_IP *=.*|AGENT_IP = ${AGENT_IP:-192.168.13.146}|g" params.ini
+          sed -i "s|^AGENT_MACHINE_USER *=.*|AGENT_MACHINE_USER = ${AGENT_MACHINE_USER:-qa}|g" params.ini
+          sed -i "s|^AGENT_MACHINE_PASSWORD *=.*|AGENT_MACHINE_PASSWORD = ${AGENT_MACHINE_PASSWORD:-password}|g" params.ini
+          sed -i "s|^AGENT_MACHINE_NAME *=.*|AGENT_MACHINE_NAME = ${AGENT_MACHINE_NAME:-AUTO-SMALL}|g" params.ini
+
+          sed -i "s|^APPLIANCE_IP *=.*|APPLIANCE_IP = $APPLIANCE_IP|g" params.ini
+          sed -i "s|^APPLIANCE_TYPE *=.*|APPLIANCE_TYPE = Genesis|g" params.ini
+          sed -i "s|^APPLIANCE_DEFAULT_FS_TYPE *=.*|APPLIANCE_DEFAULT_FS_TYPE = xfs|g" params.ini
+          sed -i "s|^APPLIANCE_NETMASK *=.*|APPLIANCE_NETMASK = $APPLIANCE_NETMASK|g" params.ini
+          sed -i "s|^APPLIANCE_DEFAULT_GATEWAY *=.*|APPLIANCE_DEFAULT_GATEWAY = $APPLIANCE_DEFAULT_GATEWAY|g" params.ini
+          sed -i "s|^APPLIANCE_NAME *=.*|APPLIANCE_NAME = $APPLIANCE_NAME|g" params.ini
+          sed -i "s|^APPLIANCE_ADMIN_USER *=.*|APPLIANCE_ADMIN_USER = $APPLIANCE_ADMIN_USER|g" params.ini
+          sed -i "s|^APPLIANCE_ADMIN_PASSWORD *=.*|APPLIANCE_ADMIN_PASSWORD = $APPLIANCE_ADMIN_PASSWORD|g" params.ini
+          sed -i "s|^APPLIANCE_ALLOW_UPGRADE *=.*|APPLIANCE_ALLOW_UPGRADE = ${APPLIANCE_ALLOW_UPGRADE:-false}|g" params.ini
+          sed -i "s|^APPLIANCE_SYNC_MODE *=.*|APPLIANCE_SYNC_MODE = CachingGateway|g" params.ini
+          sed -i "s|^APPLIANCE_INIT *=.*|APPLIANCE_INIT = false|g" params.ini
+          sed -i "s|^APPLIANCE_FIRST_RAID *=.*|APPLIANCE_FIRST_RAID = linear|g" params.ini
+
+          awk -f awkIniEditScript -v section="mac_agent" field="AGENT_IP" value="$MAC_AGENT_IP" params.ini > tmp; mv tmp params.ini;
+          awk -f awkIniEditScript -v section="mac_agent" field="AGENT_MACHINE_USER" value="$MAC_AGENT_MACHINE_USER" params.ini > tmp; mv tmp params.ini;
+          awk -f awkIniEditScript -v section="mac_agent" field="AGENT_MACHINE_PASSWORD" value="$MAC_AGENT_MACHINE_PASSWORD" params.ini > tmp; mv tmp params.ini;
+
+          awk -f awkIniEditScript -v section="linux_agent" field="AGENT_IP" value="192.168.18.173" params.ini > tmp; mv tmp params.ini;
+          awk -f awkIniEditScript -v section="linux_agent" field="AGENT_MACHINE_USER" value="root" params.ini > tmp; mv tmp params.ini;
+          awk -f awkIniEditScript -v section="linux_agent" field="AGENT_MACHINE_PASSWORD" value="activenas" params.ini > tmp; mv tmp params.ini;
+
+          cat params.ini
+        '''
+        }
+    }
+    stage("Second shell script") {
+      steps {
+        setTitle("SECOND SHELL SCRIPT")
+
+        sh '''
+        cd automation-tests/src/main/resources/
+        sed -i s@"rp.enable.*"@"rp.enable = true"@ ./reportportal.properties
+        sed -i s@"rp.launch.*"@"rp.launch = Merge_Classic-#$gitlab_branch"@ ./reportportal.properties
+        sed -i s@"rp.project.*"@"rp.project = systems-merge"@ ./reportportal.properties
+        sed -i s@"rp.skipped.issue.*"@"rp.skipped.issue = false"@ ./reportportal.properties
+        '''
+      }
+    }
+    stage("Maven Clean - automation-core") {
+      steps {
+        setTitle("Maven Clean - automation-core")
+
+        sh "mvn clean install -Dmaven.repo.local=.repository -f automation-core/pom.xml -DskipTests=true"
+      }
+    }
+    stage("Maven Clean - vi-management") {
+      steps {
+        setTitle("Maven Clean - vi-management")
+
+        sh "mvn clean install -Dmaven.repo.local=.repository -f vi-management/pom.xml -DskipTests=true"
+      }
+    }
+    stage("Maven Clean - automation-api") {
+      steps {
+        setTitle("Maven Clean - automation-api")
+
+        sh "mvn clean install -Dmaven.repo.local=.repository -f automation-api/pom.xml -DskipTests=true"
+      }
+    }
+    stage("Maven Clean - automation-tests") {
+      steps {
+        setTitle("Maven Clean - automation-tests")
+
+        sh '''mvn clean test -Dmaven.repo.local=.repository -f automation-tests/pom.xml -Dtest=ApplianceRegressionScenario -Dmaven.test.failure.ignore=true'''
+      }
+    }
+  }
+  post {
+    always {
+        setTitle("POST ACTIONS")
+
+        junit "automation-tests/target/surefire-reports/*.xml"
+
+        // script{
+        //   output = "${currentBuild.rawBuild.log}"
+        //   def description = (output =~ /PARAMS:.*APPLIANCE_VERSION=(\S*).*PORTAL_VERSION=(\S*).*TestSuite=(\S*).*TestType=(\S*).*/)
+        //   // echo ("description1 = " + description[0][1])
+        //   // echo ("description2 = " + description[0][2])
+        //   // echo ("description3 = " + description[0][3])
+        //   // echo ("description4 = " + description[0][4])
+        //   currentBuild.description = "${description[0][1]}, ${description[0][2]}, ${description[0][3]}, ${description[0][4]}"
+        // }
+        
+        emailext ( 
+                  replyTo: "jenkins@ctera.com",
+                  to: "yahml@ctera.com",
+                  // to: "meir@ctera.com",
+                  attachLog: true,
+                  compressLog: true,
+                  body: "${currentBuild.currentResult}: Job ${env.JOB_NAME} build ${env.BUILD_NUMBER}\n More info at: ${env.BUILD_URL}",
+                  subject: "${env.JOB_NAME} - Automation Report"
+                )
+
+        
+
+    }
+  }
+}

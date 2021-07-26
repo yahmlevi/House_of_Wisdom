@@ -1,0 +1,31 @@
+// https://stackoverflow.com/questions/13512948/configuring-jenkins-email-notification-with-gmail
+
+pipeline {
+    agent any
+    
+    stages {        
+        stage("build") {
+            steps {
+                echo 'Build phase....'
+            }
+        }
+        stage("test") {
+            steps {
+                echo 'Test phase....'
+            }
+        }
+        stage("deploy") {
+            steps {
+                echo 'Deploy phase....'
+            }
+        }
+
+    }
+    post {
+        always {
+            mail to: 'yahmlevi@gmail.com',
+            subject: "Test email from jenkins",
+            body: "Body of massage!"
+        }
+    }
+}

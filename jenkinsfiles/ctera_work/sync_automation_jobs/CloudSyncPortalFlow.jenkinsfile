@@ -1,0 +1,93 @@
+// project-based security can't be implemented by a pipeline, has to be manual through UI
+
+pipeline {
+    agent {
+        node {
+            label 'CloudFS_Minion'
+        }
+    }
+    options {
+        buildDiscarder(logRotator(numToKeepStr: "30"))
+        timestamps ()
+        disableConcurrentBuilds()
+    }
+    parameters {
+        string(name: "PortalVersion", description: "PortalVersion")
+    }
+    stages {
+        stage ('Init param file') {
+            steps {
+                  sh '''
+                     #!/bin/sh
+                     cd /media/newdrive/SyncGatewayParams
+                     sudo sed -i "s/PORTAL_VERSION.*/PORTAL_VERSION = $PortalVersion/" ./Portal/params.ini_Portal
+	                '''
+            }
+        }
+        stage ('RevertMachine'){
+            steps{
+				script {
+					if ( (PortalVersion ==~ /.*7.0.*/) || (PortalVersion ==~ /.*7.6.*/) ) {
+						vSphere buildStep: [$class: 'RevertToSnapshot', snapshotName: '7.0.186.19', vm: 'CloudSyncRegression Portal - Portal Flow'], serverName: 'vSphere1'
+					}
+					else {
+					    vSphere buildStep: [$class: 'RevertToSnapshot', snapshotName: '6.1.1170.7', vm: 'CloudSyncRegression Portal - Portal Flow'], serverName: 'vSphere1'
+					}
+				}
+            }
+        }
+        stage ('Portal Upgrade'){
+            steps{
+                build job: 'CloudSyncPortalUpgrade', parameters: [string(name: 'PortalVersion', value: PortalVersion), string(name: 'PortalIP', value: '192.168.17.161')]
+            }
+        }
+        stage ('Portal Init') {
+            steps {
+                build job: 'CloudSyncRegressionJob', parameters: [string(name: 'PORTAL_VERSION', value: PortalVersion), string(name: 'TestSuite', value: 'portal_init'), string(name: 'PORTAL_SETUP', value: 'true'), string(name: 'VIRTUAL_PORTAL_NAME', value: 'SyncPortal'), string(name: 'FlowToRun', value: 'Portal')], propagate: false
+            }
+        }
+        stage ('Portal') {
+            steps {
+                parallel (
+                    "App" : {
+                        build job: 'CloudSyncRegressionJob', parameters: [string(name: 'PORTAL_VERSION', value: PortalVersion), string(name: 'TestSuite', value: 'appliance'), string(name: 'VIRTUAL_PORTAL_NAME', value: 'AppPortal'), string(name: 'FlowToRun', value: 'Portal'), string(name: 'ENABLE_RP', value: 'true')], propagate: false
+                    },
+                    "App_Caching" : {
+                        build job: 'CloudSyncRegressionJob', parameters: [string(name: 'PORTAL_VERSION', value: PortalVersion), string(name: 'TestSuite', value: 'appliance_caching'), string(name: 'VIRTUAL_PORTAL_NAME', value: 'CachePortal'), string(name: 'FlowToRun', value: 'Portal'), string(name: 'APP_CACHE_TYPE', value: 'X86'), string(name: 'ENABLE_RP', value: 'true')], propagate: false
+                    },
+                     "Genesis" : {
+                        build job: 'CloudSyncRegressionJob', parameters: [string(name: 'PORTAL_VERSION', value: PortalVersion), string(name: 'TestSuite', value: 'appliance_caching'), string(name: 'VIRTUAL_PORTAL_NAME', value: 'GenesisPortal'), string(name: 'FlowToRun', value: 'Portal'), string(name: 'APP_CACHE_TYPE', value: 'Genesis'), string(name: 'APP_CACHE_IP', value: '192.168.17.25'), string(name: 'APPLIANCE_DEFAULT_GATEWAY', value: '192.168.17.1'), string(name: 'APP_CACHE_NAME', value: 'vGateway-4c3e'), string(name: 'APPLIANCE_VERSION', value: '7.0.1399.6'), string(name: 'ENABLE_RP', value: 'true') ], propagate: false
+                    },
+                    "Linux" : {
+                        build job: 'CloudSyncRegressionJob', parameters: [string(name: 'PORTAL_VERSION', value: PortalVersion), string(name: 'TestSuite', value: 'linux_agent'), string(name: 'VIRTUAL_PORTAL_NAME', value: 'LinuxPortal'), string(name: 'FlowToRun', value: 'Portal'), string(name: 'ENABLE_RP', value: 'true')], propagate: false
+                    },
+                    "MAC" : {
+                        build job: 'CloudSyncRegressionJob', parameters: [string(name: 'PORTAL_VERSION', value: PortalVersion), string(name: 'TestSuite', value: 'mac_agent'), string(name: 'VIRTUAL_PORTAL_NAME', value: 'MacPortal'), string(name: 'FlowToRun', value: 'Portal'), string(name: 'ENABLE_RP', value: 'true')], propagate: false
+                    },
+                    "WIN" : {
+                        build job: 'CloudSyncRegressionJob', parameters: [string(name: 'PORTAL_VERSION', value: PortalVersion), string(name: 'TestSuite', value: 'windows_agent'),  string(name: 'VIRTUAL_PORTAL_NAME', value: 'WinPortal'), string(name: 'FlowToRun', value: 'Portal'), string(name: 'ENABLE_RP', value: 'true')], propagate: false
+                    },
+                    "WIN_Cache" : {
+                        build job: 'CloudSyncRegressionJob', parameters: [string(name: 'PORTAL_VERSION', value: PortalVersion), string(name: 'TestSuite', value: 'windows_agent_caching'),  string(name: 'VIRTUAL_PORTAL_NAME', value: 'WinCachePortal'), string(name: 'FlowToRun', value: 'Portal'), string(name: 'ENABLE_RP', value: 'true')], propagate: false
+                    },
+                )
+            }
+        }
+        stage ('NoConcurrency') {
+            steps {
+                build job: 'CloudSyncRegressionJob', parameters: [string(name: 'PORTAL_VERSION', value: PortalVersion), string(name: 'TestSuite', value: 'appliance'), string(name: 'VIRTUAL_PORTAL_NAME', value: 'AppPortal'), string(name: 'TestType', value: 'CloudSyncRegressionNotConcurrencySuite'), string(name: 'FlowToRun', value: 'Portal'), string(name: 'APP_CACHE_TYPE', value: 'X86'), string(name: 'ENABLE_RP', value: 'true')], propagate: false
+				build job: 'CloudSyncRegressionJob', parameters: [string(name: 'PORTAL_VERSION', value: PortalVersion), string(name: 'TestSuite', value: 'appliance_caching'), string(name: 'VIRTUAL_PORTAL_NAME', value: 'CachePortal'), string(name: 'TestType', value: 'CloudSyncRegressionNotConcurrencySuite'), string(name: 'FlowToRun', value: 'Portal'), string(name: 'APP_CACHE_TYPE', value: 'X86'), string(name: 'ENABLE_RP', value: 'true')], propagate: false
+            }
+        }
+        stage ('FSCK Test') {
+            steps {
+                build job: 'CloudSyncRunFSCK', parameters: [string(name: 'FlowToRun', value: 'Portal')], propagate: false
+            }
+        }
+        stage ('Verify Parent Guid') {
+            steps {
+                build job: 'CloudSyncVerifyParentGuid', parameters: [string(name: 'FlowToRun', value: 'Portal')], propagate: false
+            }
+        }
+    }
+}

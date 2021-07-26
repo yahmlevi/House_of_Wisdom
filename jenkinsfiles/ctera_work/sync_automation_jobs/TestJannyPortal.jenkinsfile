@@ -1,0 +1,30 @@
+pipeline {
+    agent {
+        node {
+            label 'CloudFS_Minion'
+        }
+    }
+    options {
+        buildDiscarder(logRotator(numToKeepStr: "30"))
+        disableConcurrentBuilds()
+    }
+    parameters {
+        string(name: "PortalVersion", description: "PortalVersion")
+    }
+    stages {
+        stage ('Init param file') {
+            steps {
+                  sh '''
+                     #!/bin/sh
+                     cd /media/newdrive/SyncGatewayParams
+                     sudo sed -i "s/PORTAL_VERSION.*/PORTAL_VERSION = $PortalVersion/" ./Portal/params.ini_Portal
+	                '''
+            }
+        }
+        stage ('Deploy machines') {
+            steps { 
+                build job: 'ESXI deploy', parameters: [string(name: 'IMG_TYPE', value: 'PORTAL'), string(name: 'VM_NAMES', value: 'cloudfs_portal_flow'), string(name: 'SERVERS_ROLES', value: 'master'), string(name: 'IMG_IMAGE_VERSION', value: '7.0.186.19'), string(name: 'IMG_VC_VM_DESTINATION_FOLDER', value: 'Engineering/CloudSync/CloudSyncRegression') ], propagate: false
+            }
+        }
+    }
+}

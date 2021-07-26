@@ -1,0 +1,55 @@
+pipeline{
+    agent { 
+        label "master"
+    }
+    stages{
+        stage('Git'){
+            steps{
+                checkout([$class: 'GitSCM', branches: [[name: '*/master']],
+                        doGenerateSubmoduleConfigurations: false,
+                        gitTool: 'Default',
+                        userRemoteConfigs: [[credentialsId: 'GitLab', url: 'http://git.ctera.local/devops/ci-cd']]
+                        ])
+            }
+        }
+        stage('CallApi'){
+            steps{
+                script{
+                    sh '''
+                        cd Scripts
+                        printf "" > /media/newdrive/ApplianceAutomation/Versions/out.txt
+                        python3 getmrbranchesapp.py > /media/newdrive/ApplianceAutomation/Versions/out.txt
+                    '''
+                }
+            }
+        }
+        stage('Mergebrnaches'){
+            environment {
+                props = readProperties file:'/media/newdrive/ApplianceAutomation/Versions/out.txt'
+                SOURCH_BRANCH = "${props["SOURCH_BRANCH"]}"
+                build_num = "${BUILD_NUMBER}"
+			}
+            steps{
+                checkout([$class: 'GitSCM', branches: [[name: '*/dev']],
+                        doGenerateSubmoduleConfigurations: false,
+                        gitTool: 'Default',
+                        userRemoteConfigs: [[credentialsId: 'GitLab', url: 'http://git.ctera.local/Appliance/App.git']]
+                        ])
+                script{
+                    sh '''
+                        echo $build_num
+                        echo $SOURCH_BRANCH
+                        git checkout dev 
+                        git merge --ff $SOURCH_BRANCH
+                        sudo git push -u origin dev:next_day_branch_$build_num
+                    '''
+                }
+            }
+        }
+    }
+    post { 
+        always { 
+            cleanWs()
+        }
+    }
+}

@@ -1,0 +1,18 @@
+pipeline {
+    agent {
+        docker { image 'maven:3.8.1-adoptopenjdk-11' }
+    }
+    stages {
+        stage('First Stage') {
+            steps {
+                echo 'hello world'
+            }
+        }
+
+        stage('Second Stage') {
+            steps {
+                sh 'mvn --version'
+            }
+        }
+    }
+}

@@ -1,0 +1,235 @@
+// BlockOn needs to be configured manually - Kernel_Tests Portal_GUI_Tests Agent_GUI_Tests
+
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+
+
+pipeline {
+  agent {
+    node { 
+      label "gui-agent-slave"
+    } 
+  }
+  options {
+    timeout(time: 360, unit: "MINUTES")
+    buildDiscarder(logRotator(numToKeepStr: "10", daysToKeepStr: "30"))
+  }
+  parameters {
+    choice(name: "APP_Branch", choices: ["dev", "6.0"], description: "APP_Branch")
+    choice(name: "TestSuite", choices: ["fullTest", "sanityTest"], description: "TestSuite")
+    string(name: "APP_IP", defaultValue: "192.168.13.116", description: "Appliance to run tests on")
+  }
+  stages {
+    stage("Prepare an environment for the run") {
+      steps {
+        setTitle("PREPARE ENVIRONMENT")
+        
+        deleteDir()
+        
+        script{
+          def props = readProperties  file: "GUI_Branch.txt"
+          
+          if ("${APP_Branch}" == "dev") {
+            APP_GUI_BRANCH = "master"
+          } else {
+            APP_GUI_BRANCH = "APP-${APP_Branch}"
+            }
+            sh "echo ${APP_GUI_BRANCH} > GUI_Branch.txt"
+        }
+      }
+    }
+    stage("Checkout") {
+      steps {
+        setTitle("CHECKOUT")
+        
+        dir("Mock-Server"){
+          checkout([  $class: "GitSCM", branches: [[name: "master"]],
+            userRemoteConfigs: [[credentialsId: "0367fbd2-e744-4d9d-8bba-e5bf20bc115b",
+            url: "http://git.ctera.local/GUI/Mock-Server.git"]]])
+        }
+        dir("APP_GUI") {
+          git branch: "${APP_GUI_BRANCH}", credentialsId: "0367fbd2-e744-4d9d-8bba-e5bf20bc115b", url: "http://git.ctera.local/GUI/GUI.git"
+        }
+        dir("DevOps_jenkins_jobs") {
+          git branch: "master", credentialsId: "0367fbd2-e744-4d9d-8bba-e5bf20bc115b", url: "http://git.ctera.local/devops/jenkins_jobs.git"
+        }
+      }
+    }
+    stage("First shell script") {
+      steps {
+        setTitle("FIRST SHELL SCRIPT")
+        
+        // sh """
+        //     for process in `sudo ps -ef | grep webdriver | grep -v grep | awk '{print $2}'`; do sudo kill -9 $process; done
+        //     cd /home/jenkins/APP_GUI_Tests
+        //     rm -rf www
+        //     cp /mnt/versions/App/Versions/App_${APP_Branch}_GUI.tar .
+        //     tar xf App_${APP_Branch}_GUI.tar
+        //     rm -f App_${APP_Branch}_GUI.tar
+        //     cd /home/jenkins/APP_GUI_Tests/APP_GUI/WebTools/tests/test-appliance-protractor
+        //     sed -i s#\"ctera-mock-server\"\:.*#\"ctera-mock-server\"\:\ \"\/home\/jenkins\/APP_GUI_Tests\/Mock-Server\"# package.json
+        //     sed -i s#webAppPath.*#webAppPath\ \:\ \"\/home\/jenkins\/APP_GUI_Tests\/www\"\,# env.conf.js
+        //     sed -i s#realServerAddress.*#realServerAddress\:\ \"$APP_IP\"\,# env.conf.js
+        //     sed -i s#.*Mock-Server.*#\ \ \ \ \ \ \"version\"\:\ \"file\:\/home\/jenkins\/APP_GUI_Tests\/Mock-Server\"\,# package-lock.json
+        //     """
+        sh '''
+            for process in `sudo ps -ef | grep webdriver | grep -v grep | awk '{print $2}'`; do sudo kill -9 $process; done
+            cd /home/jenkins/APP_GUI_Tests
+            rm -rf www
+            cp /mnt/versions/App/Versions/App_${APP_Branch}_GUI.tar .
+            tar xf App_${APP_Branch}_GUI.tar
+            rm -f App_${APP_Branch}_GUI.tar
+            cd /home/jenkins/APP_GUI_Tests/APP_GUI/WebTools/tests/test-appliance-protractor
+            sed -i 's#\\"ctera-mock-server\\"\\:.*#\\"ctera-mock-server\\"\\:\\ \\"\\/home\\/jenkins\\/APP_GUI_Tests\\/Mock-Server\\"#' package.json
+            sed -i 's#webAppPath.*#webAppPath\\ \\:\\ \\"\\/home\\/jenkins\\/APP_GUI_Tests\\/www\\"\\,#' env.conf.js
+            sed -i 's#realServerAddress.*#realServerAddress\\:\\ \\"$APP_IP\\"\\,#' env.conf.js
+            sed -i 's#.*Mock-Server.*#\\ \\ \\ \\ \\ \\ \\"version\\"\\:\\ \\"file\\:\\/home\\/jenkins\\/APP_GUI_Tests\\/Mock-Server\\"\\,#' package-lock.json
+          '''
+      }
+    }
+    stage("Second shell script") {
+      steps {
+        setTitle("SECOND SHELL SCRIPT")
+ 
+        sh '''
+            cd /home/jenkins/APP_GUI_Tests/Mock-Server
+            npm install
+            cd /home/jenkins/APP_GUI_Tests/APP_GUI/WebTools/tests/test-appliance-protractor
+            npm install
+            sudo webdriver-manager clean
+            sudo webdriver-manager update
+            webdriver-manager start &
+            sleep 10
+        '''
+      }
+    }
+    stage("First conditional step") {
+      steps {
+          script{
+            setTitle("FIRST CONDITIONAL STEP")
+              
+            if ("${currentBuild.currentResult}" == "SUCCESS") {
+                sh """
+                  cd /home/jenkins/APP_GUI_Tests/APP_GUI/WebTools/tests/test-appliance-protractor
+                  npm run ${TestSuite}
+                """
+            } else {
+                echo "CONDITIONAL STEP NOT MET - FAILING THE JOB"
+                // error("Build failed because condition is not met")
+            }
+          }
+      }
+    }
+    stage("Third shell script") {
+      steps {
+        setTitle("THIRD SHELL SCRIPT")
+        
+        sh '''
+            for process in `sudo ps -ef | grep webdriver | grep -v grep | awk '{print $2}'`; do sudo kill -9 $process; done
+
+            cd APP_GUI
+            set SONAR_SCANNER_OPTS=-Xmx1024m
+            sonar-scanner -Dsonar.projectKey=GUI-$APP_GUI_Branch -Dsonar.projectVersion=App-$(date +%s) -Dsonar.sources=. -Dsonar.scm.provider=git -Dsonar.exclusions=admingui/common/shared/third-party/**,admingui/common/admin/third-party/**,admingui/common/portalbeta/third-party/**,WebTools/**,admingui/common/script/mozilla-pdf**/**,admingui/common/script/ext/ext-all.js,admingui/common/script/ext/adapter/**,admingui/common/script/ext/resources/**,admingui/common/admin/styles/css/**,admingui/common/shared/styles/sass/bootstrap/**,admingui/common/shared/styles/sass/angular-material/**,admingui/common/portalbeta/styles/sass/intl-tel-input/** -Dsonar.gitlab.url=http://git.ctera.local -Dsonar.gitlab.user_token=zNcsUzzod6Xnhr2Gf6Ey -Dsonar.gitlab.project_id=16 -Dsonar.gitlab.ref_name=$APP_GUI_Branch -Dsonar.gitlab.query_max_retry=100 -Dsonar.gitlab.query_wait=3000
+            
+            sleep 30
+            
+            ProjectStatus=`curl -u ba0eb8c043dbfe9389e334b7d3647918463736c4: http://sonar.ctera.local/api/qualitygates/project_status?projectKey=GUI-master | jq '.projectStatus.status'`
+            curl -u 471654e5fc0909e43bcf361beb440687d4ae5aaf: "http://sonar.ctera.local/api/measures/search_history?metrics=new_bugs,new_vulnerabilities,new_code_smells,new_line_coverage&component=GUI-master" > $WORKSPACE/SonarMeasures.txt
+            New_vulnerabilities=`cat $WORKSPACE/SonarMeasures.txt | jq '.measures[] | select(.metric == "new_vulnerabilities") | .history[].value' | tail -1`
+            New_bugs=`cat $WORKSPACE/SonarMeasures.txt | jq '.measures[] | select(.metric == "new_bugs") | .history[].value' | tail -1`
+            New_code_smells=`cat $WORKSPACE/SonarMeasures.txt | jq '.measures[] | select(.metric == "new_code_smells") | .history[].value' | tail -1`
+            New_line_coverage=`cat $WORKSPACE/SonarMeasures.txt | jq '.measures[] | select(.metric == "new_line_coverage") | .history[].value' | tail -1`
+            
+            echo "ProjectStatus=${ProjectStatus}" > $WORKSPACE/Sonar_Quality.txt
+            echo "New_vulnerabilities=${New_vulnerabilities}" >> $WORKSPACE/Sonar_Quality.txt
+            echo "New_bugs=${New_bugs}" >> $WORKSPACE/Sonar_Quality.txt
+            echo "New_code_smells=${New_code_smells}" >> $WORKSPACE/Sonar_Quality.txt
+            echo "New_line_coverage=${New_line_coverage}" >> $WORKSPACE/Sonar_Quality.txt
+          '''
+      }
+    }
+    stage("Fourth shell script") {
+      steps {
+        setTitle("FOURTH SHELL SCRIPT")
+
+        sh '''
+            rm -rf sonar_issues.*
+            curl -u 471654e5fc0909e43bcf361beb440687d4ae5aaf: "http://sonar.ctera.local/api/issues/search?componentRoots=GUI-master&sinceLeakPeriod=true" > $WORKSPACE/sonar_issues.txt
+            cat $WORKSPACE/sonar_issues.txt | jq . > $WORKSPACE/sonar_issues.tmp
+            mv $WORKSPACE/sonar_issues.tmp $WORKSPACE/sonar_issues.txt
+            sed -i /\\"component\\"/s/"\\/"/'%2F'/g $WORKSPACE/sonar_issues.txt
+            sed -i /\\"component\\"/s/"GUI\\-master\\:"/"http\\:\\/\\/sonar\\.ctera\\.local\\/code\\?id\\=GUI\\-master\\&selected\\=GUI\\-master\\%3A"/g $WORKSPACE/sonar_issues.txt
+        '''
+      }
+    }
+    stage("Execute Python script") {
+      steps {
+          script{
+            setTitle("EXECUTING PYTHON SCRIPT")
+
+            sh "python DevOps_jenkins_jobs/Automation_Jobs/APP_GUI_Tests/script.py"
+          
+            def props = readProperties  file: "${WORKSPACE}/Sonar_Quality.txt"
+          }
+        }
+    }
+    stage("Fifth shell script") {
+      steps {
+        setTitle("FIFTH SHELL SCRIPT")
+
+        sh '''
+            if [ $ProjectStatus != '"OK"' ]; then
+                echo Quality Gate for the projext is in failed state
+                exit 1
+            fi
+        '''
+      }
+    }
+  }
+  post {
+    always {
+        setTitle("POST ACTIONS")
+
+        // junit "APP_GUI/WebTools/tests/test-appliance-protractor/testresults/*.xml"
+        junit allowEmptyResults: true, testResults: "APP_GUI/WebTools/tests/test-appliance-protractor/testresults/*.xml"
+
+        emailext (
+                  replyTo: "jenkins@ctera.com",
+                  to: "yahml@ctera.com",
+                  // to: "ruslan@ctera.com, yaron@ctera.com, yaniv@ctera.com, guy@ctera.com, zvi@ctera.com, moshe@ctera.com",
+                  body: '''
+                    <h1 style="color:blue;"><b><i>SonarQube Quality Gate Portal-GUI results</i></b> <BR></h1>
+                    
+                    <table style="width:35%">
+                        <tr>
+                            <td><h2>Project Status </h2></th>
+                            <td><h2>$ProjectStatus</h2></th> 
+                        </tr>
+                        <tr>
+                            <td>Vulnerabilities </td>
+                            <td>$New_vulnerabilities </td>
+                        </tr>
+                        <tr>
+                            <td>Bugs </td>
+                            <td>$New_bugs </td>
+                        </tr>
+                        <tr>
+                            <td>Code smells</td>
+                            <td>$New_code_smells</td>
+                        </tr>
+                        <tr>
+                            <td>Line coverage </td>
+                            <td>$New_line_coverage </td>
+                        </tr>
+                    </table>
+                    ${JELLY_SCRIPT,template="html"}
+                    ${FILE,path="sonar_issues.html"}
+                  ''',
+                  subject: "APP ${APP_Branch} GUI Tests - ${TestSuite} - ${currentBuild.currentResult}"
+        )   
+    }
+  }
+}

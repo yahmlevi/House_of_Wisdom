@@ -1,0 +1,48 @@
+version: "2"
+services:
+  master:
+    # image: jenkins-docker
+    image: jenkins-master-with-docker
+    # image: eeacms/jenkins-master
+    # user: root
+    ports:
+    - "8080:8080"
+    # - "8443:8443"
+    - "50000:50000"
+    environment:
+    # - DOCKER_HOST=tcp://host.docker.internal:2375
+    - JAVA_OPTS=-Xmx2048m
+    volumes:
+    - jenkins-master:/var/jenkins_home
+    - /var/run/docker.sock:/var/run/docker.sock
+    # - jenkins-home:/var/jenkins_home
+
+  worker:
+    # image: jenkins-docker
+    # image: jenkins-docker-slave
+    # image: eeacms/jenkins-slave
+    # image: eeacms/jenkins-slave-dind:1.13
+    image: eeacms/jenkins-slave-dind:latest
+    # user: root
+    environment:
+      # - DOCKER_HOST=tcp://host.docker.internal:2375
+      - JAVA_OPTS=-Xmx2048m
+      - JENKINS_MASTER=http://master:8080
+      - JENKINS_NAME=worker
+      - JENKINS_USER=yahm
+      - JENKINS_PASS=1234
+      - JENKINS_RETRY=10
+      # Whitespace-separated list of labels to be assigned
+      # for this slave. Multiple options are allowed.
+      - JENKINS_LABELS=yahm yuval tsadok
+    volumes:
+    - jenkins-worker:/var/jenkins_home/worker
+    - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  jenkins-master:
+  jenkins-worker:
+  # jenkins-home:
+
+# docker-compose scale worker=3
+# Install Dokcer plugins!! (docker pipeline)

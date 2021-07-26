@@ -1,0 +1,28 @@
+pipeline {
+    // Run job on agent (slave) labeled 'yahm'
+    // changed worker label to 'yahm' in JENKINS UI (configure agent)
+    agent { label 'yuval' }
+    
+    stages {
+        
+        stage("build") {
+            steps {
+                echo 'Build phase....'
+                sh 'printenv'
+            }
+        }
+
+        stage("test") {
+            steps {
+                echo 'Test phase....'
+            }
+        }
+
+        stage("deploy") {
+            steps {
+                echo 'Deploy phase....'
+            }
+        }
+
+    }   
+}

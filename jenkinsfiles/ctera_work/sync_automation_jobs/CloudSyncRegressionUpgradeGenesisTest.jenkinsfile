@@ -1,0 +1,127 @@
+// project-based security can't be implemented by a pipeline, has to be manual through UI
+
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+
+
+pipeline {
+  agent {
+     node { 
+        label "CloudFS_Logger"
+        } 
+  }
+  options {
+    buildDiscarder(logRotator(daysToKeepStr: "30", numToKeepStr: "500"))
+    timestamps ()
+    disableConcurrentBuilds()
+  }
+  parameters {
+    gitParameter name: "GitBranch", 
+            type: "PT_BRANCH_TAG",
+            branchFilter: ".*",
+            tagFilter: "*"
+            defaultValue: "origin/dev",
+            selectedValue: "DEFAULT",
+            sortMode: "NONE",
+            useRepository: "http://git.ctera.local/Automation/Automation.git", 
+			description: "GIT Branch or Version tag to build from"
+
+    string(name: "APPLIANCE_VERSION", description: "APPLIANCE_VERSION will hold the version to be upgraded to , from the one held as default in snapshot")
+    string(name: "APPLIANCE_IP", description: "APPLIANCE_IP")
+    string(name: "PORTAL_IP", description: "PORTAL_IP")
+    string(name: "VIRTUAL_PORTAL_NAME", description: "VIRTUAL_PORTAL_NAME")
+    choice(name: "ENABLE_RP", choices: ["false", "true"], description: "ENABLE_RP")
+  }
+  stages {
+    stage("Checkout") {
+        steps {
+            setTitle("CHECKOUT")
+
+           checkout([  $class: "GitSCM", branches: [[name: "${params.GitBranch}"]],
+                   extensions: [[$class: "GitLFSPull"]], userRemoteConfigs: [[credentialsId: "0367fbd2-e744-4d9d-8bba-e5bf20bc115b",
+                   url: "http://git.ctera.local/Automation/Automation.git"]]])
+        }
+    }
+    stage("First bash script") {
+      steps {
+        setTitle("FIRST BASH SCRIPT")
+
+        sh '''
+            cat /media/newdrive/SyncGatewayParams/App/params.ini_GenesisUpgrade > ./automation-tests/syncParams.ini
+            if [ "$APPLIANCE_VERSION" != "" ]; then sed -i s/"APPLIANCE_VERSION.*"/"APPLIANCE_VERSION = $APPLIANCE_VERSION"/ ./automation-tests/syncParams.ini; fi
+            if [ "$APPLIANCE_IP" != "" ]; then sed -i s/"APPLIANCE_IP.*"/"APPLIANCE_IP = $APPLIANCE_IP"/ ./automation-tests/syncParams.ini; fi
+            if [ "$PORTAL_IP" != "" ]; then sed -i s/"PORTAL_IP.*"/"PORTAL_IP = $PORTAL_IP  "/ ./automation-tests/syncParams.ini; fi
+            if [ "$VIRTUAL_PORTAL_NAME" != "" ]; then sed -i s/"VIRTUAL_PORTAL_NAME.*"/"VIRTUAL_PORTAL_NAME = $VIRTUAL_PORTAL_NAME"/ ./automation-tests/syncParams.ini; fi
+            cat ./automation-tests/syncParams.ini
+        '''
+      }
+    }
+    stage("Maven Clean - automation-core") {
+      steps {
+        setTitle("Maven Clean - automation-core")
+
+        sh "mvn clean install -Dmaven.repo.local=.repository -f automation-core/pom.xml -DskipTests=true"
+      }
+    }
+    stage("Maven Clean - vi-management") {
+      steps {
+        setTitle("Maven Clean - vi-management")
+
+        sh "mvn clean install -Dmaven.repo.local=.repository -f vi-management/pom.xml -DskipTests=true"
+      }
+    }
+    stage("Maven Clean - automation-api") {
+      steps {
+        setTitle("Maven Clean - automation-api")
+
+        sh "mvn clean install -Dmaven.repo.local=.repository -f automation-api/pom.xml -DskipTests=true"
+      }
+    }
+    stage("Second bash script") {
+      steps {
+        setTitle("SECOND BASH SCRIPT")
+
+        sh '''
+            cd automation-tests/src/main/resources/
+            sed -i s/"rp.enable.*"/"rp.enable = $ENABLE_RP"/ ./reportportal.properties
+            sed -i s/"rp.skipped.issue.*"/"rp.skipped.issue = false"/ ./reportportal.properties
+            sed -i s/"rp.launch.*"/"rp.launch = CloudSyncApplianceUpgradeScenario"/ ./reportportal.properties
+            sed -i s/"rp.project.*"/"rp.project = cloudfs-genesis"/ ./reportportal.properties
+
+            echo "rp.description = $APPLIANCE_VERSION" >> ./reportportal.properties
+            echo "rp.attributes = Ver:$APPLIANCE_VERSION;" >> ./reportportal.properties
+
+            cat reportportal.properties
+        '''
+      }
+    }
+    stage("Maven Clean - automation-tests") {
+      steps {
+        setTitle("Maven Clean - automation-tests")
+
+        sh '''mvn clean $MAVEN_EXEC_MODE -Dmaven.repo.local=.repository -f automation-tests/pom.xml -Dtest=CloudSyncApplianceUpgradeScenario -Dmaven.test.failure.ignore=true'''
+      }
+    }
+  }
+  post {
+    always {
+        setTitle("POST ACTIONS")
+
+        junit "automation-tests\\target\\surefire-reports\\*.xml"
+
+
+        emailext (
+            replyTo: "jenkins@ctera.com",
+            to : "yahml@ctera.com"
+            // to: "janny@ctera.com, idan@ctera.com, adi@ctera.com, einat@ctera.com, yahml@ctera.com",
+            mimeType: "text/html",
+            body: '''${JELLY_SCRIPT,template="html"}''',
+            subject: "CloudSyncUpgradeScenario Genesis ${APPLIANCE_VERSION}"
+        )
+    }
+    }
+  }
+}

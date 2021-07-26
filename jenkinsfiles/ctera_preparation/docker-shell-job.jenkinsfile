@@ -1,0 +1,21 @@
+pipeline {
+    agent any
+    stages {
+        stage('First Stage') {
+            steps {
+                echo 'from echo'
+            }
+        }
+
+        stage('Second Stage') {
+            steps {
+                script{
+                    //sh '''#!/bin/bash echo "hello world" '''
+                    sh 'docker ps'
+                }
+                // //sh '''#!/bin/bash echo "hello world" '''
+                // docker ps
+            }
+        }
+    }
+}

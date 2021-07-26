@@ -1,0 +1,92 @@
+// project-based security can't be implemented by a pipeline, has to be manual through UI
+
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+
+pipeline {
+    agent {
+        node {
+            label 'CloudFS_Minion'
+        }
+    }
+    options {
+        buildDiscarder(logRotator(numToKeepStr: "30"))
+    }
+    parameters {
+        gitParameter name: 'GitBranch',
+            type: 'PT_BRANCH_TAG',
+            tagFilter: '*',
+            branchFilter: '.*',
+            defaultValue: 'origin/dev',
+            selectedValue: 'NONE',
+            sortMode: 'NONE',
+            useRepository: 'http://git.ctera.local/Automation/Automation.git', 
+			description: 'GIT Branch or Version tag to build from'
+
+        string(name: "VG_VERSION", description: "VG_VERSION")
+        string(name: "GENESIS_VERSION", description: "GENESIS_VERSION")
+    }
+    stages {
+        stage("Checkout") {
+            steps {
+                setTitle("CHECKOUT")
+
+                checkout([  $class: "GitSCM", branches: [[name: "${params.GitBranch}"]],
+                    userRemoteConfigs: [[credentialsId: "0367fbd2-e744-4d9d-8bba-e5bf20bc115b",
+                    url: "http://git.ctera.local/Automation/Automation.git"]]])
+            }
+        }
+        stage ('First vSphere step'){
+            steps{
+                setTitle('First vSphere step')
+
+                vSphere buildStep: [$class: 'RevertToSnapshot', snapshotName: '10K', vm: 'CloudFS - FSOperations auto - portal'], serverName: 'vSphere1'	
+            }
+        }
+        stage ('Second vSphere step'){
+            steps{
+                setTitle('Second vSphere step')
+
+                vSphere buildStep: [$class: 'PowerOn', timeoutInSeconds: 300, vm: 'CloudFS - FSOperations auto - portal'], serverName: 'vSphere1'
+            }
+        }
+        stage ('Third vSphere step'){
+            steps{
+                setTitle('Third vSphere step')
+
+                vSphere buildStep: [$class: 'RevertToSnapshot', snapshotName: '10K', vm: 'CloudFS - FSOperations auto - Genesis1'], serverName: 'vSphere1'
+            }
+        }
+        stage ('Fourth vSphere step'){
+            steps{
+                setTitle('Fourth vSphere step')
+
+                vSphere buildStep: [$class: 'PowerOn', timeoutInSeconds: 300, vm: 'CloudFS - FSOperations auto - Genesis1'], serverName: 'vSphere1'
+            }
+        }
+        stage ('Fifth vSphere step'){
+            steps{
+                setTitle('Fifth vSphere step')
+
+                vSphere buildStep: [$class: 'RevertToSnapshot', snapshotName: '10K', vm: 'CloudFS - FSOperations auto - Genesis2'], serverName: 'vSphere1'
+            }
+        }
+        stage ('Sixth vSphere step'){
+            steps{
+                setTitle('Sixth vSphere step')
+
+                vSphere buildStep: [$class: 'PowerOn', timeoutInSeconds: 300, vm: 'CloudFS - FSOperations auto - Genesis2'], serverName: 'vSphere1'
+            }
+        }
+        stage ('First build CloudSyncStandAloneScenarios job') {
+            steps {
+                setTitle('First build CloudSyncStandAloneScenarios job')
+
+                build job: 'CloudSyncStandAloneScenarios', parameters: [string(name: 'TestType', value: "CloudSyncFsOperationScenario"), string(name: 'VG_VERSION', value: "${VG_VERSION}"), string(name: 'GENESIS_VERSION', value: "${GENESIS_VERSION}"), string(name: 'GitBranch', value: "${params.GitBranch}")], wait: true
+            }
+        }
+    }
+}

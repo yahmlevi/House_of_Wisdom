@@ -1,0 +1,245 @@
+// project-based security can't be implemented by a pipeline, has to be manual through UI
+
+def setTitle(title){
+    echo "==================================================|"
+    echo title
+    echo "==================================================|"
+}
+
+
+pipeline {
+  agent {
+      node { 
+        label "PortalAutomationMinion"
+      } 
+  }
+  options {
+    timeout(time: 360, unit: "MINUTES")
+    buildDiscarder(logRotator(numToKeepStr: "500", daysToKeepStr: "30"))
+  }
+  parameters {
+    string(name: "PortalIP", defaultValue: "192.168.14.40", description: "PortalIP")
+    string(name: "TOMCAT_PortalIP", defaultValue: "192.168.14.44", description: "TOMCAT_PortalIP")
+    string(name: "AgentIP", defaultValue: "192.168.17.164", description: "AgentIP")
+    string(name: "AgentMachineName", defaultValue: "AUTO-SMALL", description: "AgentMachineName")
+    string(name: "AgentVersion", defaultValue: "6.0.626.1", description: "AgentVersion")
+    string(name: "ApplianceIP", defaultValue: "192.168.14.46", description: "ApplianceIP")
+    string(name: "Appliance_Name", defaultValue: "vgw1-for-portal-daily", description: "Appliance_Name")
+    choice(name: "TestSuites", choices: ["DailyTests_6_5", "DailyTests_6_0", "DailyTests_5_5FP", "PortalHourlyTests", "HourlyTests_6_5", "HourlyTests_6_0", "HourlyTests_5_5_FP", "DailyTests_Common", "PortalInitialization", "PortalSanityTests_6_5", "PortalSanityTests_5_5FP", "SupportReportTest"], description: "TestSuites")
+    string(name: "PortalVersion", defaultValue: "", description: "PortalVersion")
+    string(name: "ApplianceVersion", defaultValue: "7.0.905", description: "ApplianceVersion")
+    string(name: "APPLIANCE_TYPE", defaultValue: "Genesis", description: "APPLIANCE_TYPE")
+    string(name: "APPLIANCE_NETMASK", defaultValue: "255.255.255.0", description: "APPLIANCE_NETMASK")
+    string(name: "APPLIANCE_DEFAULT_GATEWAY", defaultValue: "192.168.17.1", description: "APPLIANCE_DEFAULT_GATEWAY")
+    gitParameter(name: "AutomationVersion", defaultValue: "origin/dev", selectedValue: "DEFAULT", type: "PT_BRANCH_TAG", branchFilter: ".*", tagFilter: "*")
+  }
+  stages {
+    stage("Checkout") {
+        steps {
+            setTitle("CHECKOUT")
+       
+            checkout([  $class: "GitSCM", branches: [[name: "${AutomationVersion}"]],
+                    extensions: [[$class: "GitLFSPull"]], userRemoteConfigs: [[credentialsId: "0367fbd2-e744-4d9d-8bba-e5bf20bc115b",
+                    url: "http://git.ctera.local/Automation/Automation.git"]]])
+                        
+            dir("Jenkins") {
+                sh "ls -l"
+                git branch: "dev", credentialsId: "0367fbd2-e744-4d9d-8bba-e5bf20bc115b", url: "http://git.ctera.local/PIM/Jenkins.git"
+                sh "ls -l"
+            }
+        }
+    }
+    stage("First shell script") {
+      steps {
+        setTitle("FIRST SHELL SCRIPT")
+
+        sh '''
+            #!/bin/bash
+
+            if [ "$AutomationVersion" != "origin/dev" ]; then
+                exit 0
+            fi
+            
+            curl -sX POST https://ctera.dev/ingest -d @- << EOF
+            {"type": "automation",
+            "product": "portal",
+            "container": "portal",
+            "sut_mode": "$TestSuites",
+            "sut_platform": "x86",
+            "sut_gw": "$ApplianceIP",
+            "sut_portal": "$PortalIP",
+            "sut_agent": "$AgentIP",
+            "version_gw": "$ApplianceVersion",
+            "version_portal": "$PortalVersion",
+            "version_agent": "$AgentVersion",
+            "suite": "$TestSuites",
+            "jenkins_build_url": "$BUILD_URL",
+            "jenkins_job": "$JOB_BASE_NAME",
+            "jenkins_build_id": $BUILD_NUMBER
+            }
+            EOF
+
+            if [ $? -ne 0 ]; then
+                echo "Failed logging automation! Likely this run will NOT appear and be counted for in the builds/automation dashboards!"
+            fi
+
+            exit 0
+            '''
+        }
+    }
+    stage("Maven Clean - automation-core") {
+      steps {
+        setTitle("Maven Clean - automation-core")
+
+        sh "ls -l"
+        sh "mvn clean install -Dmaven.repo.local=.repository -f automation-core/pom.xml -Dmaven.test.skip=true"
+      }
+    }
+    stage("Maven Clean - vi-management") {
+      steps {
+        setTitle("Maven Clean - vi-management")
+
+        sh "ls -l"
+        sh "mvn clean install -Dmaven.repo.local=.repository -f vi-management/pom.xml -Dmaven.test.skip=true"
+      }
+    }
+    stage("Maven Clean - automation-api") {
+      steps {
+        setTitle("Maven Clean - automation-api")
+
+        sh "ls -l"
+        sh "mvn clean install -Dmaven.repo.local=.repository -f automation-api/pom.xml -Dmaven.test.skip=true"
+      }
+    }
+    stage("First conditional step") {
+      steps {
+          script{
+            setTitle("FIRST CONDITIONAL STEP")
+              
+            if (fileExists("automation-tests/params.ini")) {
+                echo "FILE EXSISTS"
+                error("Build failed because condition is not met")
+            } else {
+                echo "FILE DOESN'T EXSISTS" 
+                sh '''#!/bin/bash
+                    cd automation-tests
+                    cp /root/workspace/params.ini params.ini
+                '''
+            }
+        }
+      }
+    }
+    stage("Second shell script") {
+      steps {
+        setTitle("SECOND SHELL SCRIPT")
+        
+        sh '''
+            #!/bin/bash
+
+            echo ${PortalIP}
+            echo $PATH
+            cd automation-tests
+            sed -i "s/^PORTAL_IP[ \t]*=.*/PORTAL_IP = ${PortalIP}/" params.ini
+            sed -i "s/^AGENT_IP[ \t]*=.*/AGENT_IP = ${AgentIP}/" params.ini
+            sed -i "s/^AGENT_MACHINE_NAME[ \t]*=.*/AGENT_MACHINE_NAME = ${AgentMachineName}/" params.ini
+            sed -i "s/^AGENT_VERSION[ \t]*=.*/AGENT_VERSION = ${AgentVersion}/" params.ini
+            sed -i "s/^APPLIANCE_IP[ \t]*=.*/APPLIANCE_IP = ${ApplianceIP}/" params.ini
+            sed -i "s/^APPLIANCE_NAME[ \t]*=.*/APPLIANCE_NAME = ${Appliance_Name}/" params.ini
+            sed -i "s/^APPLIANCE_VERSION[ \t]*=.*/APPLIANCE_VERSION = ${ApplianceVersion}/" params.ini
+            sed -i "s/^APPLIANCE_TYPE[ \t]*=.*/APPLIANCE_TYPE = ${APPLIANCE_TYPE}/" params.ini
+            sed -i "s/^APPLIANCE_NETMASK[ \t]*=.*/APPLIANCE_NETMASK = ${APPLIANCE_NETMASK}/" params.ini
+            sed -i "s/^APPLIANCE_DEFAULT_GATEWAY[ \t]*=.*/APPLIANCE_DEFAULT_GATEWAY = ${APPLIANCE_DEFAULT_GATEWAY}/" params.ini
+            sed -i "s/^PORTAL_VERSION[ \t]*=.*/PORTAL_VERSION = ${PortalVersion}/" params.ini
+            sed -i 's/^PORTAL_LICENSE[ \t]*=.*/PORTAL_LICENSE = DPB05-9AA06-AFB98-AF705-SC350-WC350-JC350-UC350-LC350-GC350-HC350-IC350-KC350-MC350-V1R1/' params.ini
+            sed -i 's/^PORTAL_DNS_SUFFIX[ \t]*=.*/PORTAL_DNS_SUFFIX = ctera.me/' params.ini
+            sed -i 's/^PORTAL_CERTIFICATE_LOCATION[ \t]*=.*/PORTAL_CERTIFICATE_LOCATION = ctera_me_2021.zip/' params.ini
+
+            if [ -f configuration/portalSanity/servers.ini ] && [ "X${TOMCAT_PortalIP}" != "X" ]; then
+                perl -i -pe "s{^PORTAL_IP =.*}{++\$n == 1 ? 'PORTAL_IP = ${PortalIP}' : $&}ge" configuration/portalSanity/servers.ini
+                perl -i -pe "s{^PORTAL_ROLE =.*}{++\$n == 1 ? 'PORTAL_ROLE = MAIN_DB' : $&}ge" configuration/portalSanity/servers.ini
+                perl -i -pe "s{^PORTAL_VERSION =.*}{++\$n == 1 ? 'PORTAL_VERSION = ${PortalVersion}' : $&}ge" configuration/portalSanity/servers.ini
+                perl -i -pe "s{^PORTAL_IP =.*}{++\$n == 2 ? 'PORTAL_IP = ${TOMCAT_PortalIP}' : $&}ge" configuration/portalSanity/servers.ini
+                perl -i -pe "s{^PORTAL_ROLE =.*}{++\$n == 2 ? 'PORTAL_ROLE = TOMCAT_ONLY' : $&}ge" configuration/portalSanity/servers.ini
+                perl -i -pe "s{^PORTAL_VERSION =.*}{++\$n == 2 ? 'PORTAL_VERSION = ${PortalVersion}' : $&}ge" configuration/portalSanity/servers.ini
+            fi
+
+            cat params.ini
+            '''
+      }
+    }
+    stage("Maven Clean - automation-tests") {
+      steps {
+        setTitle("Maven Clean - automation-tests")
+
+        sh "ls -l"
+        sh '''mvn clean test -Dmaven.repo.local=.repository -f automation-tests/pom.xml -Dtest=${TestSuites} \
+            -Dmaven.test.failure.ignore=true \
+            -DreportsDirectory=TestReports \
+            -DredirectTestOutputToFile=true \
+            -Dctera.auto.staging.mode=1 \
+            -Dctera.auto.dev.staging.resolv=${PortalIP}'''
+      }
+    }
+    stage("Second conditional step") {
+      steps {
+          script{
+            setTitle("SECOND CONDITIONAL STEP")
+
+            if ("${currentBuild.currentResult}" == "SUCCESS" || "UNSTABLE") {
+                
+            try {
+                sh '''
+                        cd Jenkins
+                        rm known_hosts
+                        python PortalDumpCopier.py $PortalIP ctera321 `pwd`
+                    '''
+            }
+            catch (exc) {
+                echo "Could not execute shell"
+            }
+            } else {
+                echo "Current build is not Success or Unstable"
+                error("Build failed because condition is not met")
+            }
+          }
+        }
+    }
+    stage("Fifth shell script") {
+      steps {
+        setTitle("FIFTH SHELL SCRIPT")
+
+        sh '''
+            #!/bin/bash
+
+            if [ "$AutomationVersion" != "origin/dev" ]; then
+                exit 0
+            fi
+
+            curl -sX POST https://ctera.dev/ingest -d @- << EOF
+            {"type": "automation",
+            "jenkins_build_url": "$BUILD_URL",
+            "jenkins_job": "$JOB_BASE_NAME",
+            "jenkins_build_id": $BUILD_NUMBER,
+            "finished": true
+            }
+            EOF
+
+            if [ $? -ne 0 ]; then
+                echo "Failed logging automation! Likely this run will NOT appear and be counted for in the builds/automation dashboards!"
+            fi
+
+            exit 0
+            '''
+      }
+    }
+  }
+  post {
+    always {
+        setTitle("POST ACTIONS")
+
+        archiveArtifacts artifacts: "automation-tests/target/surefire-reports/*.xml, automation-core.log, Jenkins/ctera_dump.tar.gz.*", fingerprint: true, defaultExcludes: true, followSymlinks: true, caseSensitive: true
+        
+        junit "automation-tests/target/surefire-reports/*.xml"
+    }
+  }
+}
