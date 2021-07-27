@@ -224,7 +224,6 @@ pipeline{
                         '''
                     }
                 }
-                // TODO - STOPPED HERE
                 echo "Uploading to Artifactory"
                 script {
                     withEnv(["PORTAL_VERSION=${conf.globals.versionPrefix}.${BUILD_NUMBER}","REPOSITORY_KEY=${conf.globals.stagingRepoKey}"]){
@@ -246,6 +245,7 @@ pipeline{
                                 )
                             }
                         }
+                        // TODO STOPPED HERE
                         println new groovy.json.JsonBuilder(stagingMap).toPrettyString()
                         rtUpload (serverId: "artifactory",spec: new groovy.json.JsonBuilder(stagingMap).toString())
                     }
