@@ -16,4 +16,4 @@ kubectl get prometheus -A
 
 nginx ingress controller helm
 
-install prometheus chart on monitoring ns, then install jenkins chart on jenkins ns - monitoring will happen by itself
+install prometheus chart on monitoring ns, then install jenkins chart on jenkins ns - monitoring will happen by itself --> tried it, cant tell it worked
