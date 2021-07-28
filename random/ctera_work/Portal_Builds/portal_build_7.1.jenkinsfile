@@ -245,7 +245,6 @@ pipeline{
                                 )
                             }
                         }
-                        // TODO STOPPED HERE
                         println new groovy.json.JsonBuilder(stagingMap).toPrettyString()
                         rtUpload (serverId: "artifactory",spec: new groovy.json.JsonBuilder(stagingMap).toString())
                     }

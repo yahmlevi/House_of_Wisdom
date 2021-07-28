@@ -1,0 +1,103 @@
+def repositories = [prod: 'portal-rc-global-repo', staging:'global-repo']
+
+pipeline{
+    agent { label 'Gradle_MR' }
+    tools{
+        gradle '5.3.1'
+        jdk '1.8.201'
+    }
+    stages{
+        stage('query'){
+            steps{
+                echo "Packaging Portal:\n\t - Version: ${VERSION}\n\t - Repository: ${REPOSITORY} (http://artifactory.ctera.local/artifactory/${repositories[REPOSITORY]})"
+                deleteDir()
+            }
+        }
+        stage('Download Artifacts'){
+            steps{
+                checkout(
+                    [$class: 'GitSCM', branches: [[name: 'MainOpenJDK']], 
+                    doGenerateSubmoduleConfigurations: false, 
+                    extensions: [[$class: 'SparseCheckoutPaths', sparseCheckoutPaths: [[path: 'portal-distribution-project']]]], 
+                    submoduleCfg: [], 
+                    userRemoteConfigs: [[credentialsId: '0367fbd2-e744-4d9d-8bba-e5bf20bc115b', url: 'http://git.ctera.local/Portal/Backend.git']]])
+                
+                dir('./portal-distribution-project'){
+                    sh "gradle clean install -Porg.gradle.internal.plugins.portal.url.override=http://artifactory.ctera.local/artifactory/plugins-gradle-org/ -PportalVersion=${VERSION} -Partifactory_virtual_repo=${repositories[REPOSITORY]} -i"
+                }
+                script {
+                    sh "tar -zxvf $WORKSPACE/portal-distribution-project/build/tomcat/webapps/StaticFiles-${VERSION}.tar.gz"
+                }
+            }
+        }
+        stage('RPM Build'){
+            steps{
+                checkout(
+                        [$class: 'GitSCM', branches: [[name: 'MainOpenJDK']], 
+                        doGenerateSubmoduleConfigurations: false, 
+                        extensions: [[$class: 'SparseCheckoutPaths', sparseCheckoutPaths: [[path: 'kit']]]], 
+                        submoduleCfg: [], 
+                        userRemoteConfigs: [[credentialsId: '0367fbd2-e744-4d9d-8bba-e5bf20bc115b', url: 'http://git.ctera.local/Portal/Backend.git']]])
+                script {
+                        def VERSIONSEPARATORS = ((VERSION =~ /\./).count)
+                        println("Version separator count = ${VERSIONSEPARATORS}")
+                        if (VERSIONSEPARATORS == 2) {
+                            (resolvedMajor, resolvedMinor, resolvedBuild) = VERSION.split("\\.")
+                            resolvedRelease="${resolvedMajor}.${resolvedMinor}"
+                        } else if (VERSIONSEPARATORS == 3) {
+                            (resolvedMajor, resolvedMinor, resolvedBuild, resolvedPatch) = VERSION.split("\\.")
+                            resolvedRelease="${resolvedMajor}.${resolvedMinor}"
+                         	resolvedBuild+=".${resolvedPatch}"
+                        } else if (VERSIONSEPARATORS == 4) {
+                            (resolvedMajor, resolvedMinor, resolvedBuild, resolvedPatch, resolvedPatchMinor) = VERSION.split("\\.")
+                            resolvedRelease="${resolvedMajor}.${resolvedMinor}"
+                         	resolvedBuild+=".${resolvedPatch}.${resolvedPatchMinor}"
+                        }
+						
+                        println("resolvedRelease = ${resolvedRelease} resolvedBuild = ${resolvedBuild}")
+                        withEnv(["BUILD=${resolvedBuild}","RELEASE=${resolvedRelease}"]){
+                        sh '''#!/bin/bash
+                            rm -rf $WORKSPACE/artifact
+                            echo ">>> $RELEASE.$BUILD"
+                            chmod 755 $WORKSPACE/Backend/kit/linux/rpm_make.sh
+                            sudo mkdir -p /new_portal_net_dir/Portals/7.1.x/$RELEASE.$BUILD
+                            sudo cp $WORKSPACE/StaticFiles/schema-upgrade.xsd /new_portal_net_dir/Portals/7.1.x/schema-upgrade/schema-upgrade.xsd
+                            filesize=$(stat -c %s StaticFiles/schema-upgrade.xml)
+                            if [ $filesize != 0 ]; then
+                                sudo cp $WORKSPACE/StaticFiles/schema-upgrade.xml /new_portal_net_dir/Portals/7.1.x/schema-upgrade/schema-upgrade-$RELEASE.$BUILD.xml
+                                sudo cp $WORKSPACE/StaticFiles/schema-upgrade.xml /new_portal_net_dir/Portals/7.6.x/schema-upgrade/schema-upgrade-$RELEASE.$BUILD.xml
+                            fi
+                            $WORKSPACE/Backend/kit/linux/rpm_make.sh CTERA-Portal $RELEASE $BUILD x86_64 $WORKSPACE
+                            
+                            sudo rpm --addsign RPM/RPMS/x86_64/CTERA-Portal-$RELEASE.$BUILD.x86_64.rpm
+                            mkdir -p $WORKSPACE/artifact
+                        '''
+                        dir('RPM/RPMS/x86_64'){
+                            sh '''
+                                tar cvf $WORKSPACE/artifact/CTERA-Portal-$RELEASE.$BUILD.tar CTERA-Portal-$RELEASE.$BUILD.x86_64.rpm
+                            '''
+                        }
+                        dir('artifact'){
+                            sh '''                                
+                                printf $RELEASE.$BUILD > version.txt                                
+                                md5sum CTERA-Portal-$RELEASE.$BUILD.tar | awk '{print $1}' > CTERA-Portal-$RELEASE.$BUILD.tar.md5
+                                tar cvfz CTERA-Portal-$RELEASE.$BUILD.tgz version.txt CTERA-Portal-$RELEASE.$BUILD.tar CTERA-Portal-$RELEASE.$BUILD.tar.md5
+                                rm -f CTERA-Portal-$RELEASE.$BUILD.tar CTERA-Portal-$RELEASE.$BUILD.tar.md5                                
+                            '''     
+                        }
+                        script{
+                            if(params.COPY_TO_VGWVERSIONS){
+                                sh '''
+                                    sudo mkdir -p /new_portal_net_dir/GradleBuildTemp/Portals/7.1.x/$RELEASE.$BUILD/
+                                    sudo rm -f /new_portal_net_dir/GradleBuildTemp/Portals/7.1.x/$RELEASE.$BUILD/CTERA-Portal-$RELEASE.$BUILD.tgz
+                                    sudo cp $WORKSPACE/artifact/CTERA-Portal-$RELEASE.$BUILD.tgz /new_portal_net_dir/Portals/7.1.x/$RELEASE.$BUILD/
+                                '''
+                            }
+                            archiveArtifacts artifacts: 'artifact/*.tgz', fingerprint: true, onlyIfSuccessful: true
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
