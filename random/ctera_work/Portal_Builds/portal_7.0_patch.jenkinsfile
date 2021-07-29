@@ -1,0 +1,451 @@
+def conf =[:]
+def automation = [:]
+def myWorkspace = env.UpStreamWorkspace
+pipeline{
+    agent {        
+        node{
+            label AGENT
+            customWorkspace myWorkspace
+        }
+    }
+    tools{
+        gradle '5.3.1'
+        maven 'Maven 3.6.1'
+    }
+    stages{
+        stage("Setup printouts"){
+            steps{
+                echo "Setup printouts START"
+            
+                echo "Setup printouts END"    
+            }
+        }
+        stage("Setup Pipeline Configuration"){
+            steps{
+                checkout([$class: 'GitSCM', branches: [[name: '*/dev']], doGenerateSubmoduleConfigurations: false, gitTool: 'Default', submoduleCfg: [], userRemoteConfigs: [[credentialsId: '0367fbd2-e744-4d9d-8bba-e5bf20bc115b', url: 'http://git.ctera.local/PIM/Jenkins.git']]])                
+                checkout([$class: 'GitSCM', branches: [[name: '*/${gitlabBranch}']], doGenerateSubmoduleConfigurations: false, gitTool: 'Default', submoduleCfg: [], userRemoteConfigs: [[credentialsId: '0367fbd2-e744-4d9d-8bba-e5bf20bc115b', url: 'http://git.ctera.local/Portal/Backend.git']], extensions: [[$class: 'CheckoutOption', timeout: 30], [$class: 'CloneOption', noTags: false, reference: '', timeout: 30], [$class: 'RelativeTargetDirectory', relativeTargetDir: 'Backend'] ]])
+                script{
+                    echo ">>> Loading '${RUN_AS.toLowerCase()}' pipeline configuration"
+                    conf = readJSON file: "./GradlePipelines/Portal/Configurations/daily7.0.json"
+                    conf.globals.portalBranch = "*/${gitlabBranch}"
+                    if(RUN_AS == "GATED_MERGE_REQUEST"){
+                        GATED_MERGE_REQUEST_INFO.tokenize(';').each{
+                            conf.sonar.put(it.tokenize('=').first(),it.tokenize('=').last())
+                        }
+                    }
+                }
+            }
+        }
+        stage('CTERA Portal Build'){
+            parallel{
+                stage("Build Portal Backend"){
+                    // steps{echo 'foo'}
+                    steps{
+                        script{
+                            if(RUN_AS != "daily7.0"){
+                                checkout changelog: false, poll: false, scm: [
+                                    $class: 'GitSCM', branches: [[name: conf.globals.portalBranch]], 
+                                    doGenerateSubmoduleConfigurations: false, 
+                                    extensions: [
+                                        [$class: 'CheckoutOption', timeout: 30], 
+                                        [$class: 'CloneOption', noTags: false, reference: '', timeout: 30], 
+                                        [$class: 'RelativeTargetDirectory', relativeTargetDir: 'Backend']
+                                    ], 
+                                    submoduleCfg: [], 
+                                    userRemoteConfigs: [[credentialsId: '0367fbd2-e744-4d9d-8bba-e5bf20bc115b', url: 'http://git.ctera.local/Portal/Backend.git']]
+                                ]
+                            }
+                            withEnv(["CTERA_VERSION_GUI=${portalPatchVersion}"]) {
+                                sh '''#!/bin/bash
+                                    cd $WORKSPACE/Backend
+                                    git tag -d "Portal_Build_$CTERA_VERSION_GUI"
+                                    git tag "Portal_Build_$CTERA_VERSION_GUI"
+                                    git push origin -f "Portal_Build_$CTERA_VERSION_GUI"
+                                    cd -
+                                    find $WORKSPACE/Backend/Backend -name "*.html" | xargs sed -i "s|common/|common-$CTERA_VERSION_GUI/|g"
+                                '''
+                            }
+                            withCredentials([usernamePassword(credentialsId: '73f36881-33c3-4c3d-bb5b-385d4ce671cd', passwordVariable: 'JENKINS_ARTIFACTORY_PWD', usernameVariable: 'JENKINS_ARTIFACTORY_USR')]) {
+                                timestamps{
+                                    dir('Backend/Backend'){
+                                        def versionTxtContent=[
+                                            "#Build Number for Gradle. Do not edit!",
+                                            "#${new Date().format("EEE MMM dd hh:mm:ss z yyyy")}",
+                                            "release=${conf.globals.versionPrefix}",
+                                            "build.number=${portalBuildVersion}"
+                                        ]
+                                        writeFile file: 'ServicesPortal/src/main/webapp/WEB-INF/version.txt', text: versionTxtContent.join("\n")
+                                        withEnv(["IS_JENKINS=true","JENKINS_PORTAL_VERSION=${portalPatchVersion}"]){
+                                            sh '''
+                                                docker container prune -f
+                                                docker volume prune -f
+                                            '''
+                                            if(RUN_UNIT_TESTS=='true') { // run with unit tests
+                                                sh '''
+                                                    gradle clean build generatePomFileForMavenPublication
+                                                '''
+                                            }
+                                            else { // run without tests
+                                                sh '''
+                                                    gradle clean build generatePomFileForMavenPublication -x test
+                                                '''    
+                                            }
+                                        }
+                                    }
+                                }
+                            }  
+                        }
+                    }
+                    post{
+                        always{
+                            dir('./Backend/Backend/Common'){
+                                junit allowEmptyResults: true, testResults: 'build/test-results/test/*.xml'
+                            }
+                            dir('./Backend/Backend/Common-Infra'){
+                                junit allowEmptyResults: true, testResults: 'build/test-results/test/*.xml'
+                            }
+                            dir('./Backend/Backend/Test-Utils'){
+                                junit allowEmptyResults: true, testResults: 'build/test-results/test/*.xml'
+                            }
+                        }
+                    }
+                }
+                stage("Build Portal GUI"){
+                    steps{
+                        checkout changelog: false, poll: false, scm: [
+                            $class: 'GitSCM', branches: [[name: '*/${guiBranch}']], 
+                            doGenerateSubmoduleConfigurations: false, 
+                            extensions:[
+                                [$class: 'CheckoutOption', timeout: 45], 
+                                [$class: 'CloneOption', noTags: false, reference: '', timeout: 45], 
+                                [$class: 'RelativeTargetDirectory', relativeTargetDir: 'GUI']
+                            ], 
+                            submoduleCfg: [], 
+                            userRemoteConfigs: [[credentialsId: '0367fbd2-e744-4d9d-8bba-e5bf20bc115b', url: 'http://git.ctera.local/GUI/GUI.git']]
+                        ]
+                        withEnv(["CTERA_VERSION_GUI=${portalPatchVersion}"]) {
+                            dir('GUI'){
+                                sh '''#!/bin/bash
+                                    git tag "Portal_Build_$CTERA_VERSION_GUI"
+                                    git push origin "Portal_Build_$CTERA_VERSION_GUI"
+                                '''
+                            }
+                            dir('GUI/WebTools/portal-gui-build'){
+                                sh label: 'GUI Build', script: '''
+                                    #npm run build --osfamily="unix" -- --path=/common-$CTERA_VERSION_GUI/
+                                    npm config ls -l
+                                    npm run build -- --path=/common-$CTERA_VERSION_GUI/
+                                    rm -rf $WORKSPACE/gui_artifact
+                                    mkdir -p $WORKSPACE/gui_artifact/common-$CTERA_VERSION_GUI 
+                                    rsync -av --progress $WORKSPACE/GUI/admingui/common/  $WORKSPACE/gui_artifact/common-$CTERA_VERSION_GUI  --exclude "**/.project/**" --exclude "**/_svn/**" --exclude "**/.svn/**" --exclude "**/.gitkeep"
+                                    mkdir $WORKSPACE/gui_artifact/common-$CTERA_VERSION_GUI/WEB-INF
+                                    cp $WORKSPACE/Backend/Backend/Common/WEB-INF/web.xml $WORKSPACE/gui_artifact/common-$CTERA_VERSION_GUI/WEB-INF
+                                    mkdir $WORKSPACE/gui_artifact/common-$CTERA_VERSION_GUI/schema
+                                    cp $WORKSPACE/Backend/Backend/Portal-Schema/src/main/resources/schema/schema.xml $WORKSPACE/gui_artifact/common-$CTERA_VERSION_GUI/schema
+                                '''
+                            }
+                            dir("gui_artifact/common-${portalPatchVersion}"){
+                                sh label: 'GUI Package', script: '''
+                                    jar cf ../common-$CTERA_VERSION_GUI.war .
+                                '''
+                            }
+                        }
+                    }
+                }
+                stage("setup automation env masters"){
+                    steps{
+                        script{
+                            conf.lab.master.each{
+                                vSphere buildStep: [$class: 'RevertToSnapshot', snapshotName: it.snapshot , vm: it.name], serverName: 'vSphere1'
+                                vSphere buildStep: [$class: 'PowerOn', timeoutInSeconds: 180, vm: it.name], serverName: 'vSphere1'
+                                // echo "revert master"
+                            }
+                        }
+                    }
+                }
+                stage("setup automation env slaves"){
+                    steps{
+                        script{
+                           conf.lab.slave.each{
+                                vSphere buildStep: [$class: 'RevertToSnapshot', snapshotName: it.snapshot , vm: it.name], serverName: 'vSphere1'
+                                vSphere buildStep: [$class: 'PowerOn', timeoutInSeconds: 180, vm: it.name], serverName: 'vSphere1'
+                                // echo "revert master"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        stage("Upload to Staging Repository"){
+            steps{
+                echo "create Static Files"
+                checkout changelog: false, poll: false, scm: [
+                    $class: 'GitSCM', branches: [[name: '*/master']], 
+                    doGenerateSubmoduleConfigurations: false, 
+                    extensions: [
+                        [$class: 'RelativeTargetDirectory', relativeTargetDir: 'sdconv'], 
+                        [$class: 'PathRestriction', excludedRegions: '.*', includedRegions: ''], 
+                        [$class: 'CheckoutOption', timeout: 30], 
+                        [$class: 'CloneOption', noTags: false, reference: '', shallow: true, timeout: 30]
+                    ], 
+                    submoduleCfg: [], 
+                    userRemoteConfigs: [[credentialsId: '0367fbd2-e744-4d9d-8bba-e5bf20bc115b', url: 'http://git.ctera.local/innovation/sdconv.git']]
+                ]
+                
+                withEnv(["CTERA_VERSION=${portalPatchVersion}"]) {
+                    script{ 
+                        sh '''
+                            rm -rf $WORKSPACE/StaticFiles
+                            mkdir -p $WORKSPACE/StaticFiles/output
+                            cp $WORKSPACE/Backend/Backend/DBConsistencyChecker.sh $WORKSPACE/StaticFiles/
+                            cp $WORKSPACE/sdconv/sdconv.py $WORKSPACE/StaticFiles/
+                            cp $WORKSPACE/Backend/Backend/Common/db.schema.xml $WORKSPACE/StaticFiles/
+                            cp $WORKSPACE/Backend/Backend/Common/dbInstall.bat $WORKSPACE/StaticFiles/
+                            cp $WORKSPACE/Backend/Backend/Common/dbInstall.sh $WORKSPACE/StaticFiles/
+                            cp $WORKSPACE/Backend/Backend/Common/src/main/resources/hibernate.cfg.xml $WORKSPACE/StaticFiles/
+                            cp $WORKSPACE/Backend/Backend/Common/src/main/java/com/ctera/jaas/settings/org/apache/catalina/authenticator/mbeans-descriptors.xml $WORKSPACE/StaticFiles/
+                            cp $WORKSPACE/Backend/Backend/Common/src/main/java/com/ctera/jaas/settings/org/apache/catalina/startup/Authenticators.properties $WORKSPACE/StaticFiles/
+                            cp $WORKSPACE/Backend/Backend/build.xml $WORKSPACE/StaticFiles/
+                            cp $WORKSPACE/Backend/Backend/Portal-Schema/src/main/resources/schema-upgrade/schema-upgrade.xsd $WORKSPACE/StaticFiles/
+                            cp $WORKSPACE/Backend/Backend/Portal-Schema/src/main/resources/schema-upgrade/schema-upgrade.xml $WORKSPACE/StaticFiles/
+                            cp $WORKSPACE/Backend/Backend/Common/lib/*.so $WORKSPACE/StaticFiles/
+                            tar -zcvf $WORKSPACE/StaticFiles/output/StaticFiles-$CTERA_VERSION.tar.gz StaticFiles
+                        '''
+                    }
+                }
+                echo "Uploading to Artifactory"
+                script {
+                    withEnv(["PORTAL_VERSION=${portalPatchVersion}","REPOSITORY_KEY=${conf.globals.stagingRepoKey}"]){
+                        def stagingMap = [files:[]]
+                        conf.artifacts.each{
+                            def resolvedPattern = it.pattern
+                            stagingMap.files.add(
+                                [
+                                    pattern: "${it.pattern}.${it.ext}",
+                                    target: "${REPOSITORY_KEY}/com/ctera/portal/${it.name}/${PORTAL_VERSION}/${it.name}-${PORTAL_VERSION}.${it.ext}"
+                                ]
+                            )
+                            if(it.withPOM){
+                                stagingMap.files.add(
+                                    [
+                                        pattern: "${it.pattern}.pom",
+                                        target: "${REPOSITORY_KEY}/com/ctera/portal/${it.name}/${PORTAL_VERSION}/${it.name}-${PORTAL_VERSION}.pom"
+                                    ]
+                                )
+                            }
+                        }
+                        println new groovy.json.JsonBuilder(stagingMap).toPrettyString()
+                        rtUpload (serverId: "artifactory",spec: new groovy.json.JsonBuilder(stagingMap).toString())  
+                    } 
+                }  
+                rtPublishBuildInfo (serverId: "artifactory")
+            }
+        }
+        stage("Upgrade Portal on Automation Servers"){
+            steps{
+                script{
+                    configFileProvider([configFile(fileId: '2ad9979f-4c8d-438a-ac53-45b16a8682a3', targetLocation: 'scripts/automation-lab.yml')]) {
+                        def db = conf.lab.master.ip.collect{"${it} ansible_ssh_user=root ansible_ssh_pass=ctera321"}.join(System.lineSeparator())
+                        def tomcat = conf.lab.slave.ip.collect{"${it} ansible_ssh_user=root ansible_ssh_pass=ctera321"}.join(System.lineSeparator())
+                        writeFile file: 'scripts/servers', text: ["[DB]",db,"[Tomcat]",tomcat].join(System.lineSeparator())
+                        writeFile file: 'scripts/conf.json', text: "{ \"portal_version\": \"${portalPatchVersion}\", \"installation_root_location\": \"../versions/artifact\" } " 
+                        writeFile file: 'scripts/ansible.cfg', text: ['[defaults]', 'host_key_checking = false'].join(System.lineSeparator())
+                    }       
+                    sh '''
+                        if [ -d ./versions ]; then rm -Rf ./versions; fi
+                        mkdir -p versions
+                    '''
+                    withCredentials([usernamePassword(credentialsId: '3749532a-7e95-4db8-a33d-3a78db33b3ec', passwordVariable: 'ROOT_PWD', usernameVariable: 'ROOT_USR')]) {
+                        def packagingJob = build job: 'Portal-Pack-7.0', parameters: [string(name: 'REPOSITORY', value: 'staging'), string(name: 'VERSION', value: "${portalPatchVersion}"), booleanParam(name: 'COPY_TO_VGWVERSIONS', value: true)]
+                        copyArtifacts fingerprintArtifacts: true, projectName: 'Portal-Pack-7.0', selector: lastSuccessful(), target: 'versions'
+                        dir('scripts'){
+                            sh 'ansible-playbook automation-lab.yml -i servers --extra-vars "@conf.json"'
+                        }
+                    }
+                }
+            }
+        }
+        stage("Run Automation tests"){
+            steps{
+            parallel(
+                'PortalSanityTests6_0': {
+                script{
+                    if (params.Automation6_0){
+                    conf.lab1.each{ eut ->
+                            stage("${eut.suites.last()}"){
+                                eut.suites.each{ suite->
+                                    // build job: 'Run Automation Scenarios', parameters: [
+                                    build job: 'Run_Automation_Scenarios_pipeline', parameters: [
+                                        string      (name: 'PortalIP'                  , value: eut.master.ip),
+                                        string      (name: 'TOMCAT_PortalIP'           , value: eut.slave.ip),
+                                        string      (name: 'AgentIP'                   , value: eut.agent.ip),
+                                        string      (name: 'AgentMachineName'          , value: eut.agent.machineName),
+                                        string      (name: 'AgentVersion'              , value: eut.agent.version),
+                                        string      (name: 'ApplianceIP'               , value: eut.appliance.ip),
+                                        string      (name: 'Appliance_Name'            , value: eut.appliance.name),
+                                        string      (name: 'TestSuites'                , value: suite),
+                                        string      (name: 'PortalVersion'             , value: "${portalPatchVersion}"),
+                                        gitParameter(name: 'AutomationVersion'         , value: "${AutomationVersion}"),
+                                        string      (name: 'ApplianceVersion'          , value: eut.appliance.version),
+                                        string      (name: 'APPLIANCE_TYPE'            , value: eut.appliance.type),
+                                        string      (name: 'APPLIANCE_NETMASK'         , value: eut.appliance.netmask),
+                                        string      (name: 'APPLIANCE_DEFAULT_GATEWAY' , value: eut.appliance.defaultGateway)
+                                    ]
+                                }
+                            }
+                        //build job: 'Run Automation Scenarios' , parameters: automation["${eut.suites.last()}"] //run imidiately to avoid the parallel execution - experimental fix
+                    }
+                        parallel automation
+                    }
+                }
+            },
+            'PortalSanityTests6_5': {
+                script{
+                    if (params.Automation6_5){
+                    conf.lab2.each{ eut ->
+                            stage("${eut.suites.last()}"){
+                                eut.suites.each{ suite->
+                                    //build job: 'Run Automation Scenarios', parameters: [
+                                    build job: 'Run_Automation_Scenarios_pipeline', parameters: [
+                                        string      (name: 'PortalIP'                  , value: eut.master.ip),
+                                        string      (name: 'TOMCAT_PortalIP'           , value: eut.slave.ip),
+                                        string      (name: 'AgentIP'                   , value: eut.agent.ip),
+                                        string      (name: 'AgentMachineName'          , value: eut.agent.machineName),
+                                        string      (name: 'AgentVersion'              , value: eut.agent.version),
+                                        string      (name: 'ApplianceIP'               , value: eut.appliance.ip),
+                                        string      (name: 'Appliance_Name'            , value: eut.appliance.name),
+                                        string      (name: 'TestSuites'                , value: suite),
+                                        string      (name: 'PortalVersion'             , value: "${portalPatchVersion}"),
+                                        gitParameter(name: 'AutomationVersion'         , value: "${AutomationVersion}"),
+                                        string      (name: 'ApplianceVersion'          , value: eut.appliance.version),
+                                        string      (name: 'APPLIANCE_TYPE'            , value: eut.appliance.type),
+                                        string      (name: 'APPLIANCE_NETMASK'         , value: eut.appliance.netmask),
+                                        string      (name: 'APPLIANCE_DEFAULT_GATEWAY' , value: eut.appliance.defaultGateway)
+                                    ]
+                                }
+                            }
+                        //build job: 'Run Automation Scenarios' , parameters: automation["${eut.suites.last()}"] //run imidiately to avoid the parallel execution - experimental fix
+                    }
+                        parallel automation
+                    }
+                }
+            },
+            'PortalSanityTests5_5': {
+                script{
+                    if (params.Automation5_5){
+                    conf.lab3.each{ eut ->
+                            stage("${eut.suites.last()}"){
+                                eut.suites.each{ suite->
+                                    //build job: 'Run Automation Scenarios', parameters: [
+                                    build job: 'Run_Automation_Scenarios_pipeline', parameters: [
+                                        string      (name: 'PortalIP'                  , value: eut.master.ip),
+                                        string      (name: 'TOMCAT_PortalIP'           , value: eut.slave.ip),
+                                        string      (name: 'AgentIP'                   , value: eut.agent.ip),
+                                        string      (name: 'AgentMachineName'          , value: eut.agent.machineName),
+                                        string      (name: 'AgentVersion'              , value: eut.agent.version),
+                                        string      (name: 'ApplianceIP'               , value: eut.appliance.ip),
+                                        string      (name: 'Appliance_Name'            , value: eut.appliance.name),
+                                        string      (name: 'TestSuites'                , value: suite),
+                                        string      (name: 'PortalVersion'             , value: "${portalPatchVersion}"),
+                                        gitParameter(name: 'AutomationVersion'         , value: "${AutomationVersion}"),
+                                        string      (name: 'ApplianceVersion'          , value: eut.appliance.version),
+                                        string      (name: 'APPLIANCE_TYPE'            , value: eut.appliance.type),
+                                        string      (name: 'APPLIANCE_NETMASK'         , value: eut.appliance.netmask),
+                                        string      (name: 'APPLIANCE_DEFAULT_GATEWAY' , value: eut.appliance.defaultGateway)
+                                    ]
+                                }
+                            }
+                        //build job: 'Run Automation Scenarios' , parameters: automation["${eut.suites.last()}"] //run imidiately to avoid the parallel execution - experimental fix
+                    }
+                        parallel automation
+                    }
+                }
+            }
+            
+        )
+        }
+	    }
+        stage("Upload to Production ready repository"){
+            steps{
+                script {
+                    if(conf.globals.publishToProdRepo){
+                        echo "upload all approved by automation artifacts to 'production-ready' repository"
+                        withEnv(["PORTAL_VERSION=${portalPatchVersion}","REPOSITORY_KEY=${conf.globals.productionRepoKey}"]){
+                            def rcmap = [files:[]]
+                            conf.artifacts.each{
+                                rcmap.files.add(
+                                    [
+                                        pattern: "${it.pattern}.${it.ext}",
+                                        target: "${REPOSITORY_KEY}/com/ctera/portal/${it.name}/${PORTAL_VERSION}/${it.name}-${PORTAL_VERSION}.${it.ext}"
+                                    ]
+                                )
+                                if(it.withPOM){
+                                    rcmap.files.add(
+                                        [
+                                            pattern: "${it.pattern}.pom",
+                                            target: "${REPOSITORY_KEY}/com/ctera/portal/${it.name}/${PORTAL_VERSION}/${it.name}-${PORTAL_VERSION}.pom"
+                                        ]
+                                    )
+                                }
+                            }
+                            rcmap.files.add(
+                                [
+                                    pattern: "versions/CTERA-Portal-${portalPatchVersion}.tgz",
+                                    target: "${REPOSITORY_KEY}/com/ctera/portal/CTERA-Portal/${PORTAL_VERSION}/CTERA-Portal-${PORTAL_VERSION}.tgz"
+                                ]
+                            )
+                            println new groovy.json.JsonBuilder(rcmap).toPrettyString()
+                            rtUpload (
+                                serverId: "artifactory",
+                                spec: new groovy.json.JsonBuilder(rcmap).toString()
+                            )  
+                        } 
+                    }else{
+                        echo "publish to 'production-ready' repository is suppressed"
+                    }
+                }                
+            }
+        }
+		stage('Release'){
+			environment {
+				PORTAL_BUILD = "${portalPatchVersion}"
+				props2 = readProperties file:'Backend/Backend/ServicesPortal/src/main/WebContent/WEB-INF/version.txt'
+				release = "${props2["release"]}"
+				props3 = readProperties file:'/new_portal_net_dir/APP_BUILD_NUM.txt'
+				APP_BUILD_NUM = "${props3["version"]}"
+				BUILD_URL = "${BUILD_URL}"
+				JOB_BASE_NAME = "${JOB_BASE_NAME}"
+				BUILD_NUMBER = "${BUILD_NUMBER}"
+			}
+			steps{
+				script{
+				    sh '''#!/bin/bash
+                        cd $WORKSPACE/
+                        sudo cp GUI/WebTools/portal-gui-build/pot/en.pot /new_portal_net_dir/Portals/7.0.x/$PORTAL_BUILD/
+                        echo JOB_START_TIME=`date +"%Y/%m/%d %H:%M"` > /new_portal_net_dir/JOB_START_TIME
+                        cd Backend/
+						curl -X POST -i -u build:11b96a34601be8b99761321bf7b21be24f "http://192.168.17.250:8080/job/ExecWebdav_Performance/buildWithParameters?PortalVersion=$PORTAL_BUILD"
+						curl -X POST -i -u build:11b96a34601be8b99761321bf7b21be24f "http://192.168.17.250:8080/job/Portal-CI-Executor/buildWithParameters?GatewayVersion=$APP_BUILD_NUM&PortalVersion=$PORTAL_BUILD"
+					'''						
+					build job: 'Release Portal Version',parameters: [string(name: 'CURR_VERSION', value: PORTAL_BUILD), string(name: 'RELEASE_VERSION', value: PORTAL_BUILD)], wait: false
+					build job: 'Portal-Pack-7.0', parameters: [string(name: 'REPOSITORY', value: 'prod'), string(name: 'VERSION', value: "${portalPatchVersion}"), booleanParam(name: 'COPY_TO_VGWVERSIONS', value: true)]
+					build job: 'CloudSyncPortalFlow',parameters: [string(name: 'PortalVersion', value: PORTAL_BUILD)], wait: false
+				}
+			}
+		}
+	}
+	post{
+		unsuccessful {
+			script{
+                withEnv(["PORTAL_BUILD=${portalPatchVersion}"]) {
+				    sh '''#!/bin/bash
+                        cd $WORKSPACE/
+                        sudo cp GUI/WebTools/portal-gui-build/pot/en.pot /new_portal_net_dir/Portals/7.0.x/$PORTAL_BUILD/
+				        echo "---- Build Failed -----"
+				        echo "---- Start Check if deleting directories -------"
+				    '''
+                }
+			}
+		}
+	}
+}

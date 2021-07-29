@@ -1,7 +1,7 @@
-
-
-
-JOB FLOW -->
+--------------------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------------------
+BUILD JOB FLOW -->
 
 1. "PortalSCMPoll" (http://jenkins.ctera.local/job/PortalSCMPoll/) - cron that checks every 22 hours if changes were made to Git (TODO - not sure - http://git.ctera.local/Portal/Backend.git), if changes were made, triggers  "Portal-Build-7.1".
 
@@ -11,7 +11,7 @@ JOB FLOW -->
 
     2.2 "Portal-Pack-7.1" (http://jenkins.ctera.local/view/Portal%20Builds/job/Portal-Pack-7.1/) - runs rpm_make.sh (http://git.ctera.local/Portal/Backend/blob/MainOpenJDK/Backend/kit/linux/rpm_make.sh), then archives artifacts
 
-    2.3 "Run_Automation_Scenarios_pipeline" X3, with different vars (http://jenkins.ctera.local/view/Automation/job/Run_Automation_Scenarios_pipeline/) - 
+    2.3 "Run_Automation_Scenarios_pipeline" X3, with different vars (http://jenkins.ctera.local/view/Automation/job/Run_Automation_Scenarios_pipeline/) - runs some mavens and seds and executes Jenkins/PortalDumpCopier.py (http://git.ctera.local/PIM/Jenkins/blob/dev/PortalDumpCopier.py), which connects to machine and 'rm, cp, mv' some files on it.
 
     2.3 "Portal_Sonar_Scan" X3, with different vars (http://jenkins.ctera.local/job/Portal_Sonar_Scan/) - job is currently disabled
 
@@ -27,9 +27,24 @@ JOB FLOW -->
 
         2.8.1 "CloudSyncPortalUpgrade" (http://jenkins.ctera.local/job/CloudSyncPortalUpgrade/) - runs some mavens
         
-        2.8.2 "CloudSyncRegressionJob" (http://jenkins.ctera.local/job/CloudSyncRegressionJob/) - runs some mavens, then executes get_support_report.sh from agent (?)
+        2.8.2 "CloudSyncRegressionJob" (http://jenkins.ctera.local/job/CloudSyncRegressionJob/) - runs some mavens, then executes get_support_report.sh -from agent(?)-
 
         2.8.3 "CloudSyncRunFSCK" (http://jenkins.ctera.local/job/CloudSyncRunFSCK/) -  runs some mavens
 
         2.8.4 "CloudSyncVerifyParentGuid" (http://jenkins.ctera.local/job/CloudSyncVerifyParentGuid/) - runs some mavens
-    
+--------------------------------------------------------------------------------------------------------------------------------
+PATCH FLOW -->
+
+1. "portal_7.0_pathc" (http://jenkins.ctera.local/view/Portal%20Builds/job/Portal_Patch/job/Portal_7.0_Patch/) - similar to "Portal-Build-7.1", executes manually, reads JSON like "Portal-Build-7.1", runs some gardels, seds, and npms, loads artifacts and stuff to Jfrog, then ansible just like "Portal-Build-7.1", then executes "Run_Automation_Scenarios_pipeline" in parallel with different params, then "Release Portal Version", "Portal-Pack-7.0", and "CloudSyncPortalFlow".
+
+1.2 "Run_Automation_Scenarios_pipeline" (http://jenkins.ctera.local/view/Automation/job/Run_Automation_Scenarios_pipeline/) X3 with different params - same as in BUILD FLOW
+
+1.3 "Release Portal Version" (http://jenkins.ctera.local/view/Portal%20Builds/job/Release%20Portal%20Version/) - same as in BUILD FLOW
+
+1.4 "Portal-Pack-7.0" - same as in BUILD FLOW, but with different ver num
+
+1.5 "CloudSyncPortalFlow" - same as in BUILD FLOW
+
+--------------------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------------------
