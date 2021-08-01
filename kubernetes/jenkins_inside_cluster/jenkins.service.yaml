@@ -5,7 +5,7 @@ metadata:
   labels:
     app: jenkins
 spec:
-  type: ClusterIP
+  type: NodePort # ClusterIP # tsadok's change
   ports:
     - name: ui
       port: 8080
