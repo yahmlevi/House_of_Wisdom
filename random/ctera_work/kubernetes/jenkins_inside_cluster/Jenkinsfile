@@ -1,0 +1,28 @@
+pipeline {
+    agent {
+        node { 
+            label "jenkins-slave"
+        } 
+    }
+    stages {  
+        stage("build") {
+            steps {
+                echo 'Build phase....'
+                sh 'docker images'
+                sh 'sleep 5'
+            }
+        }
+        stage("test") {
+            steps {
+                echo 'Test phase....'
+                sh 'sleep 5'
+            }
+        }
+        stage("deploy") {
+            steps {
+                echo 'Deploy phase....'
+                sh 'sleep 5'
+            }
+        }
+    }   
+}
