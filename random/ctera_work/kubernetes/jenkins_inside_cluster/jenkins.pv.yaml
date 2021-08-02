@@ -11,7 +11,8 @@ spec:
   accessModes:
     - ReadWriteOnce
   hostPath:
-    path: "/mnt/data"
+    # path: "/mnt/data"
+    path: "/var/jenkins_home"
 # apiVersion: v1
 # kind: PersistentVolume
 # metadata:
