@@ -47,4 +47,3 @@ subjects:
 - kind: ServiceAccount
   name: jenkins
   namespace: jenkins
-# {"mode":"full","isActive":false}:

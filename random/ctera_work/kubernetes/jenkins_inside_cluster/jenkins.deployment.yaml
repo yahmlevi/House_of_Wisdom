@@ -25,13 +25,9 @@ spec:
         image: jenkins/jenkins:2.235.1-lts-alpine
         imagePullPolicy: IfNotPresent
         env:
-        # - name: DOCKER_HOST # yahm
-          # value: tcp://host.docker.internal:2375 # yahm
         - name: JAVA_OPTS
           value: -Xmx2048m -Dhudson.slaves.NodeProvisioner.MARGIN=50 -Dhudson.slaves.NodeProvisioner.MARGIN0=0.85
         ports:
-        # - containerPort: 2375 # yahm
-          # protocol: TCP # yahm
         - containerPort: 8080
           protocol: TCP
         - containerPort: 50000
@@ -47,4 +43,3 @@ spec:
       - name: jenkins
         persistentVolumeClaim:
           claimName: jenkins-claim
-# {"mode":"full","isActive":false}:

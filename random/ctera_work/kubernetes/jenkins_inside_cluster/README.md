@@ -15,3 +15,6 @@ STEPS -
 install microk8s - https://microk8s.io/?_ga=2.109960325.1070382825.1627800502-205005607.1627800502
 install docker on ubuntu - https://www.digitalocean.com/community/tutorials/how-to-install-and-use-docker-on-ubuntu-18-04
 
+---------------------------
+enable cluster egress (pod egress) - 'microk8s enable dns' - https://stackoverflow.com/questions/68648746/kubernetes-pods-cant-access-the-internet-while-host-can?noredirect=1#comment121329342_68648746, https://github.com/ubuntu/microk8s/issues/1484
+
