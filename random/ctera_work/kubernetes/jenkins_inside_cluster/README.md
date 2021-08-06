@@ -16,5 +16,7 @@ install microk8s - https://microk8s.io/?_ga=2.109960325.1070382825.1627800502-20
 install docker on ubuntu - https://www.digitalocean.com/community/tutorials/how-to-install-and-use-docker-on-ubuntu-18-04
 
 ---------------------------
-enable cluster egress (pod egress) - 'microk8s enable dns' - https://stackoverflow.com/questions/68648746/kubernetes-pods-cant-access-the-internet-while-host-can?noredirect=1#comment121329342_68648746, https://github.com/ubuntu/microk8s/issues/1484
+enable pod egress - 'microk8s enable dns' - https://stackoverflow.com/questions/68648746/kubernetes-pods-cant-access-the-internet-while-host-can?noredirect=1#comment121329342_68648746, https://github.com/ubuntu/microk8s/issues/1484
+
+fix Got permission denied while trying to connect to the Docker daemon socket problem - https://stackoverflow.com/questions/48957195/how-to-fix-docker-got-permission-denied-issue 'sudo chmod 666 /var/run/docker.sock' - has implications, read in stackoverflow
 
