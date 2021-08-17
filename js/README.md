@@ -1,0 +1,1 @@
+What much JavaScript should you learn before moving to React? A thread - https://twitter.com/faheem_khan_dev/status/1426471127509917702

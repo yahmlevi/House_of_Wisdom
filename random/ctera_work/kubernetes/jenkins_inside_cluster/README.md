@@ -6,7 +6,7 @@ src - https://www.youtube.com/watch?v=eRWIJGF3Y2g&t=82s , https://github.com/mar
 STEPS - 
 1. create namespace called 'jenkins'
 2. apply all yamls under jenkins_inside_cluster in namespace
-3. port forward master pod using following command - 'kubectl -n jenkins port-forward <pod_name> 8080'
+3. port forward master pod using following command - 'kubectl -n jenkins port-forward <pod_name> 8080' OR when servies is from type NodePort, run 'kubectl -n jenkins get services' and check port, then access Jenkins using VM's ip and NodePort's port.
 4. install kubernetes plugin
 5. fill plugin's configuration (under configure clouds) using GIT's (https://github.com/marcel-dempers/docker-development-youtube-series/tree/master/jenkins) README file
 ---------------------------------------------------------------------------------------
