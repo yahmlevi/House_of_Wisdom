@@ -20,3 +20,5 @@ enable pod egress - 'microk8s enable dns' - https://stackoverflow.com/questions/
 
 fix Got permission denied while trying to connect to the Docker daemon socket problem - https://stackoverflow.com/questions/48957195/how-to-fix-docker-got-permission-denied-issue 'sudo chmod 666 /var/run/docker.sock' - has implications, read in stackoverflow
 
+Git Operations - 'git pull https://<TOKEN>@github.com/yahmlevi/House_of_Wisdom.git' - https://stackoverflow.com/questions/68775869/support-for-password-authentication-was-removed-please-use-a-personal-access-to
+
