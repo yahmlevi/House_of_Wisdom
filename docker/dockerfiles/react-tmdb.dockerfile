@@ -27,4 +27,4 @@ RUN apt-get update \
 
 ENTRYPOINT /bin/bash
 
-node.js docker container - 'docker run --rm -it -v "/${PWD}:/react" node bash'
+# node.js docker container - 'docker run --rm -it -v "/${PWD}:/react" node bash'
