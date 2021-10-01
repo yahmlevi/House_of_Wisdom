@@ -13,8 +13,6 @@ services:
       - sonarqube_data:/opt/sonarqube/data
       - sonarqube_extensions:/opt/sonarqube/extensions
       - sonarqube_logs:/opt/sonarqube/logs
-      
-      # wasnt in original docs
       - sonarqube_conf:/opt/sonarqube/conf
     ports:
       - "9000:9000"
