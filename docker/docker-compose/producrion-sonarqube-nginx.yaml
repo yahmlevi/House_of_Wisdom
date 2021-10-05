@@ -1,6 +1,13 @@
 version: "3"
 
 services:
+  nginx:
+    image: nginx:latest
+    volumes:
+      - /data/nginx:/etc/nginx/conf.d
+    ports:
+      - 80:80
+      - 443:443
   sonarqube:
     image: sonarqube:latest
     depends_on:
@@ -13,10 +20,8 @@ services:
       - sonarqube_data:/opt/sonarqube/data
       - sonarqube_extensions:/opt/sonarqube/extensions
       - sonarqube_logs:/opt/sonarqube/logs
-    ports:
-      - "9000:9000"
-      # in order to NOT specify a port when using http - also, chnage sonar.properties accordingly
-      - "80:80"
+    expose:
+      - "9000"
   db:
     image: postgres:latest
     environment:
@@ -33,5 +38,8 @@ volumes:
   postgresql:
   postgresql_data:
 
+
 # ERROR - Max virtual memory areas vm.max_map_count [65530] is too low, increase to at least [262144] - https://community.sonarsource.com/t/when-installing-sonarqube-7-9-1-it-shows-me-the-following-error/14660
 # FIX - https://stackoverflow.com/questions/51445846/elasticsearch-max-virtual-memory-areas-vm-max-map-count-65530-is-too-low-inc
+
+
