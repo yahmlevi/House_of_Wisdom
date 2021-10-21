@@ -30,3 +30,4 @@ RUN npm cache clean -f \
   && n stable
  
 ENV PATH="/usr/local/gradle/bin:${PATH}"
+# TEST
