@@ -1,0 +1,20 @@
+FROM jenkins/agent:latest
+
+USER root
+
+RUN apt-get update \
+  && apt-get install nodejs -y \
+  && apt-get install npm -y \
+  && apt-get install wget \
+  && apt-get install zip -y
+
+
+RUN npm install -g snyk \
+ && apt-get install default-jdk -y \
+ && wget https://downloads.gradle-dn.com/distributions/gradle-6.3-bin.zip \
+ && unzip gradle-6.3-bin.zip \
+ && mv gradle-6.3 /usr/local/gradle \
+ && rm gradle-6.3-bin.zip \
+ && chmod 777 /usr/local/gradle/bin/gradle*
+
+ENV PATH="/usr/local/gradle/bin:${PATH}"

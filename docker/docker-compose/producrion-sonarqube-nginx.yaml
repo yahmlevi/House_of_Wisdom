@@ -42,4 +42,7 @@ volumes:
 # ERROR - Max virtual memory areas vm.max_map_count [65530] is too low, increase to at least [262144] - https://community.sonarsource.com/t/when-installing-sonarqube-7-9-1-it-shows-me-the-following-error/14660
 # FIX - https://stackoverflow.com/questions/51445846/elasticsearch-max-virtual-memory-areas-vm-max-map-count-65530-is-too-low-inc
 
+# ERROR flood stage disk watermark [95%] exceeded - https://stackoverflow.com/questions/33369955/low-disk-watermark-exceeded-on
+# FIX - https://community.sonarsource.com/t/sonarqube-fails-to-open-issues-page/18483 OR https://medium.com/100-days-of-linux/how-to-resize-a-linux-root-file-system-af3e5096b4e4
+ 
 

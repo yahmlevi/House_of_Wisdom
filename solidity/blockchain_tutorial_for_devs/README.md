@@ -1,0 +1,1 @@
+Blockchain Tutorial For Developers: Step-By-Step Guide (Ethereum, Solidity, Web3.js) - https://www.youtube.com/watch?v=nvw27RCTaEw&list=PLS5SEs8ZftgUiassxtqEpLb0jRJsKYvJL&index=13
