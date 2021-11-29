@@ -9,16 +9,22 @@ services:
 
   python-workspace:
     container_name: python-workspace
-    image: python:latest
+    image: python:3.9
     volumes:
       - /c/projects/House_of_Wisdom/solidity/freeCodeCamp:/freeCodeCamp
     working_dir: /freeCodeCamp
-    command:  bash -c "pip install -r devops_tools/requirements.txt && tail -F anything"
-      
-
-
+    command:  bash -c "
+          pip install -r devops_tools/requirements.txt &&
+          python -m pip install --user pipx &&
+          python -m pipx ensurepath --force &&
+          tail -F anything"
+    
+# manually run the following to install brownie !!!
+# pipx install eth-brownie
+    
 
 # docker network ls
+# docker inspect
 
 
 
