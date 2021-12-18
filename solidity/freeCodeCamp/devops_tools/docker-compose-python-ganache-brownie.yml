@@ -26,5 +26,7 @@ services:
 # docker network ls
 # docker inspect
 
+# docker run -it --rm -p 8545:8545 trufflesuite/ganache-cli:latest
+# run Ganache on local linux with 'ganache-cli'
 
 

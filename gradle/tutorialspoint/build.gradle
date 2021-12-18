@@ -1,0 +1,133 @@
+// WITH ADJUSMENTS TO GRADLE 5.3.1
+
+task hello {
+  doLast {
+   println 'tutorialspoint'
+  }
+}
+
+// different syntex for defining a task
+// task('hello') << {
+//    println "tutorialspoint"
+// }
+// tasks.create(name: 'hello') << {
+//    println "tutorialspoint"
+// }
+
+// task hello
+// println hello.name
+// println project.hello.name
+
+// task hello
+
+// println tasks.hello.name
+// println tasks['hello'].name
+
+// ----------------------------
+task upper {
+  doLast {
+   String expString = 'TUTORIALS point'
+   println "Original: " + expString
+   println "Upper case: " + expString.toUpperCase()
+   }
+}
+
+// ----------------------------
+task count {
+    doLast {
+        4.times { 
+            print "$it "
+        }
+    }
+}
+
+// ----------------------------
+task groovyJDK {
+    doLast {
+        String myName = "Marc";
+        myName.each() { 
+            println "${it}" 
+        };
+    }
+}
+
+// ----------------------------
+// task taskX {
+//     doLast {
+//         println 'taskX'
+//     }
+// }
+
+// task taskY(dependsOn: 'taskX') {
+//     doLast {
+//         println "taskY"
+//     }
+// }
+
+// task taskY << {
+//    println 'taskY'
+// }
+// task taskX << {
+//    println 'taskX'
+// }
+// taskY.dependsOn taskX
+
+task taskX {
+    doLast {
+        println 'taskX'
+    }
+}
+
+taskX.dependsOn {
+   tasks.findAll { 
+    it.name.startsWith('lib') 
+   }
+}
+
+task lib1 {
+    doLast {
+        println 'lib1'
+    }
+}
+        
+task lib2 {
+    doLast {
+        println 'lib2'
+    }
+}
+
+task notALib {
+    doLast {
+        println 'notALib'
+    }
+}
+
+// ----------------------------
+// task copy(type: Copy) {
+// // description is showed when task is executed
+//    description 'Copies the resource directory to the target directory.'
+//    from 'resources'
+//    into 'target'
+//    include('**/*.txt', '**/*.xml', '**/*.properties')
+//    println("description applied")
+// }
+
+// ----------------------------
+// task eclipse << {
+//    println 'Hello Eclipse'
+// }
+
+// // #1st approach - closure returning true, if the task should be executed, false if not.
+// eclipse.onlyIf {
+//    project.hasProperty('usingEclipse')
+// }
+
+// // #2nd approach - alternatively throw an StopExecutionException() like this
+// eclipse.doFirst {
+//    if(!usingEclipse) {
+//       throw new StopExecutionException()
+//    }
+// }
+
+// ----------------------------
+// apply from: 'other.gradle'
