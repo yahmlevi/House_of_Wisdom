@@ -1,20 +1,19 @@
 #!/bin/bash
 set -e
 
-# host name is 'host.docker.internal' when running script on another Docker container, with a Windows host
-# host name is 'localhost' when running script from host
-host_name="http://host.docker.internal"
+# we can call our host by it's docker container name, which we give to it in docker-compose.yaml
+host_name="http://ganache"
 port="8545"
 
-# address of account to get balance of 
-address="0x7d30a6EB03E24eA8e6C52C1CA058b5DEc1C6457f"
+# address of account to get balance of.  Change this to your own address 
+address="0xA6754aa13D9f258fc92f67206A3d35Badf1abC4C"
 
 # get response from node -> extract hexadecimal value of balance in wei -> convert value to decimal
-result_in_wei=$(curl -X POST --data '{"jsonrpc":"2.0","method":"eth_getBalance","params":["'$address'", "latest"],"id":1}' $host_name:$port | jq -r .result | xargs printf "%f")
+balance_in_wei=$(curl -X POST --data '{"jsonrpc":"2.0","method":"eth_getBalance","params":["'$address'", "latest"],"id":1}' $host_name:$port | jq -r .result | xargs printf "%f")
 
 # divide by 10 ** 18 to convert wei to ether
-result_in_ether=$(echo "$result_in_wei/1000000000000000000" | bc)
+balance_in_ether=$(echo "$balance_in_wei/1000000000000000000" | bc)
 
 
-echo -e "\nresult in wei: $result_in_wei\n"
-echo -e "\nresult in Ether: $result_in_ether\n"
+echo -e "\nbalance in wei: $balance_in_wei"
+echo -e "balance in Ether: $balance_in_ether"
