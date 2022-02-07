@@ -1,0 +1,57 @@
+version: '3.7'
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: always
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yaml
+    ports:
+      - 9090:9090
+    command:
+      - --config.file=/etc/prometheus/prometheus.yaml
+  cadvisor:
+    image: google/cadvisor:latest
+    container_name: cadvisor
+    restart: always
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      # - /sys/fs/cgroup/cpu,cpuacct:/sys/fs/cgroup/cpuacct,cpu
+      - /proc:/hostproc:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk:/dev/disk/:ro
+    ports:
+    - 8080:8080
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: always
+    user: '0'
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=secure_pass
+    volumes:
+      - ./grafana_db:/var/lib/grafana
+    depends_on:
+      - prometheus
+    ports:
+      - 3000:3000
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    expose:
+      - 9100
+
+# grafana-cli admin reset-admin-password admin
