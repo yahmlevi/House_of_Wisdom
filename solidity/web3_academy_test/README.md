@@ -1,7 +1,7 @@
 
 
 
-TASK - get balance of an account via JSON-RPC API
+TASK - get balance of an account using JSON-RPC API
 
 
 - spin-up local ganache blockchain using Docker - 'docker run -p 8545:8545 trufflesuite/ganache-cli:latest' (we can also use a personal Ethereum node or a node-provider service like infura.io).  then -->
