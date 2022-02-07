@@ -1,6 +1,3 @@
-================================================================================================
-================================================================================================
-
 TASK - get balance the of an account using JSON-RPC API, denominated in Ether
 
 
@@ -11,6 +8,3 @@ TASK - get balance the of an account using JSON-RPC API, denominated in Ether
 
 2nd sulotion:
 - use Python's Web3 library which leverages JSON-RPC (https://web3py.readthedocs.io/en/stable/web3.eth.html). make sure to install the Web3 package on your environment.
-
-================================================================================================
-================================================================================================
