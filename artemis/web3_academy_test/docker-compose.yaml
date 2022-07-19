@@ -1,0 +1,22 @@
+version: '3'
+
+services:
+
+  ganache:
+    container_name: ganache
+    image: trufflesuite/ganache-cli:latest
+    ports:
+      - 8545:8545
+
+  python-brownie-workspace:
+    container_name: python-brownie-workspace
+    image: python:3.9
+    volumes:
+      - ${PWD}:/web3_academy
+    working_dir: /web3_academy
+    command:  bash -c "
+          apt-get update &&
+          apt-get install -y bc jq &&
+          pip install web3 &&
+          pip install eth-brownie &&
+          tail -F anything"

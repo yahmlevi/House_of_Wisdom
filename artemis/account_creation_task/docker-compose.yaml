@@ -8,16 +8,17 @@ services:
     ports:
       - 8545:8545
 
-  python-workspace:
+  python-brownie-workspace:
     container_name: python-workspace
     image: python:3.9
+    environment:
+      - PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/web3_academy
     volumes:
-      # - [FULL_PATH_TO_WORKSPACE]:/web3_academy
-      - /c/projects/House_of_Wisdom/solidity/web3_academy_test:/web3_academy
+      - ${PWD}:/web3_academy
     working_dir: /web3_academy
     command:  bash -c "
           apt-get update &&
           apt-get install -y bc jq &&
           pip install web3 &&
+          pip install tinyec &&
           tail -F anything"
-    

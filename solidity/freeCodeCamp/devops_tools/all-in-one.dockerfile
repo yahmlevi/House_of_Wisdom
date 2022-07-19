@@ -16,4 +16,4 @@ RUN pip install -r /requirements_temp/requirements.txt \
 # TODO !!
 # 1. manually install the following - 'pipx install eth-brownie'
 
-# docker run -it --rm -v "/${PWD}:/freeCodeCamp" web3-all-in-one bash
+# docker run -it --rm -v "/${PWD}:/freeCodeCamp" all-in-one bash
