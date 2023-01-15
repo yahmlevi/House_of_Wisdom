@@ -1,0 +1,25 @@
+body {
+    padding: 5% 10%;
+    font-size: 2rem;
+    font-family: 'Roboto', sans-serif;
+}
+
+ol {
+    list-style-type: upper-roman ;
+    /* list-style-position: inside; */
+}
+
+ul {
+    list-style-type: square;
+    list-style-position: inside;
+    text-align: start;
+    color: brown;
+    list-style-image: url('../html5.png');
+    list-style-position: inside;
+}
+
+::marker {
+    color: red;
+    font-size: 2rem;
+    /* content: "hey"; */
+}

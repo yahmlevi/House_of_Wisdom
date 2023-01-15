@@ -1,0 +1,46 @@
+/* select all */
+* {
+    font-family: monospace;
+}
+
+body {
+    font-size: 22px;
+    /* border: 3px solid black; */
+    background-color: papayawhip;
+}
+
+h1 {
+    border: 2px solid black;
+    font-size: 5rem;
+}
+
+/* select h1 AND h2 */
+h1, h2 {
+    color: blue;
+    width: 50%;
+}
+
+p {
+    color: rgba(0, 255, 0, 0.4);
+    /* rem == root em */
+    font-size: 1.5rem;
+}
+
+/* select a span that is INSIDE of a p */
+p span {
+    text-transform: uppercase;
+    background-color: gold;
+}
+
+.highlight {
+    background-color: red;
+    text-transform: lowercase;
+}
+
+.gray {
+    color: gray;
+}
+
+#second {
+    font-style: italic;
+}

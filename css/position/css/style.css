@@ -1,0 +1,118 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-size: 1.5rem;
+    min-height: 200vh;
+}
+
+.outer-container {
+    border: black 3px dashed;
+    width: 75vw;
+    height: 85vh;
+    margin: 40px auto;
+    position: relative;
+}
+
+.inner-container {
+    border: red 2px solid;
+    width: 40vw;
+    height: 50vh;
+    margin: 200px auto;
+    /* position: relative; */
+}
+
+.box {
+    width: 150px;
+    height: 150px;
+    color: antiquewhite;
+    padding: 1rem;
+}
+
+.absolute {
+    position: absolute;
+    background-color: red;
+    top: 0;
+    left: 0;
+    /* z-index: 1; */
+}
+
+.relative {
+    background-color: blue;
+    position: relative;
+}
+
+.fixed {
+    position: fixed;
+    background-color: green;
+    top: 100px;
+    /* left: 0; */
+}
+
+.sticky {
+    position: sticky;
+    background-color: black;
+    top: 0;
+}
+
+/* //////////////////////////////////// */
+
+html {
+    scroll-behavior: smooth;
+}
+
+section {
+    height: 100vh;
+}
+
+.blue {
+    background-color: blue;
+}
+
+.red {
+    background-color: red;
+}
+
+.green {
+    background-color: green;
+}
+
+header, footer {
+    /* background-color: black; */
+    color: white;
+    /* padding: 1rem; */
+    text-align: center;
+    height: 100px;
+}
+
+header {
+    position: sticky;
+    top: 0;
+    font-size: 5rem;
+}
+
+footer {
+    background-color: black;
+    position: sticky;
+    bottom: 0;
+    font-size: 3rem;
+    /* width: 100%; */
+}
+
+a:visited {
+    color: white;
+}
+
+.social {
+    background-color: royalblue;
+    color: aliceblue;
+    font-size: inherit;
+    padding: 1rem;
+    position: fixed;
+    top: 30%;
+    left: 0;
+    z-index: 1;
+}
